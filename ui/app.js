@@ -715,7 +715,9 @@ async function loadThreadsData() {
       if (!card) return;
       const threadId = card.dataset.threadId;
       if (threadId) {
-        window.open(`http://localhost:3100/#thread=${threadId}`, '_blank');
+        const project = state.projects.find(p => p.id === state.selectedProjectId);
+        const projectPort = project ? project.port : 3100;
+        window.open(`http://localhost:${projectPort}/#thread=${threadId}`, '_blank');
       }
     });
   } catch (err) {
@@ -903,7 +905,9 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
 });
 
 document.getElementById('chatBtn').addEventListener('click', () => {
-  window.open('http://localhost:3100', '_blank');
+  const project = state.projects.find(p => p.id === state.selectedProjectId);
+  const projectPort = project ? project.port : 3100;
+  window.open(`http://localhost:${projectPort}`, '_blank');
 });
 
 // Keyboard shortcuts
