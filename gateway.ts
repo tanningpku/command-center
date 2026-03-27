@@ -123,6 +123,17 @@ export class Gateway {
       }
     }
 
+    // Spawn harness instances for projects that aren't already running
+    for (const [id, project] of this.projects) {
+      // Skip if the project already has a harness running (e.g. companion on 3100)
+      const alreadyRunning = await this.pingProject(project);
+      if (!alreadyRunning) {
+        this.spawnInstance(id);
+      } else {
+        console.log(`[gateway] Project ${id} already running on port ${project.port}`);
+      }
+    }
+
     this.server.listen(this.port, () => {
       console.log(`[gateway] Command Center listening on http://localhost:${this.port}`);
     });
@@ -153,28 +164,28 @@ export class Gateway {
       return;
     }
 
-    // Find the companion harness entry point
-    const companionDist = process.env.COMPANION_DIST ?? path.resolve(__dirname, "../../companion/dist");
-    const entryPoint = path.join(companionDist, "index.js");
+    // Use the Command Center's own harness entry point
+    const entryPoint = path.join(import.meta.dirname, "harness-entry.js");
     if (!fs.existsSync(entryPoint)) {
-      console.warn(`[gateway] Companion harness not found at ${entryPoint} — skipping instance spawn for ${projectId}`);
+      console.warn(`[gateway] Harness entry not found at ${entryPoint} — skipping instance spawn for ${projectId}`);
       return;
     }
 
-    // Get the agent store to find the captain
-    const agentStore = this.agentStores.get(projectId);
-    const agents = agentStore?.list() ?? [];
-    const captain = agents.find((a) => a.role.toLowerCase().includes("captain") || a.role.toLowerCase().includes("project lead"));
+    // Resolve agent directory
+    const agentDir = path.join(this.dataDir, "agents", "captain");
 
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       UI_PORT: String(project.port),
+      PROJECT_DIR: this.dataDir,
+      AGENT_DIR: agentDir,
+      COMPANION_DIST: process.env.COMPANION_DIST ?? path.resolve(__dirname, "../../companion/dist"),
       MOCK_CLAUDE: process.env.MOCK_CLAUDE ?? "0",
     };
 
     console.log(`[gateway] Spawning harness instance for ${projectId} on port ${project.port}`);
     const child = spawn("node", [entryPoint], {
-      cwd: project.repo ? path.dirname(project.repo) : process.cwd(),
+      cwd: process.cwd(),
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
