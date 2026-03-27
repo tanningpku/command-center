@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Command Center CLI
+set -e
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CC_PORT="${CC_PORT:-3300}"
+BASE_URL="http://localhost:${CC_PORT}"
+PROJECT="${CC_PROJECT:-companion}"
+
+json_post() {
+  curl -s -X POST "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -d "$2"
+}
+json_get() {
+  curl -s "$BASE_URL$1" -H "X-Project-Id: $PROJECT"
+}
+json_patch() {
+  curl -s -X PATCH "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -d "$2"
+}
+
+case "${1:-help}" in
+  # --- Task commands ---
+  task)
+    case "${2:-list}" in
+      create)
+        shift 2
+        TITLE="" PRIORITY="normal" LABELS="" ISSUE="" ASSIGNEE="" DESC=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --title) TITLE="$2"; shift 2;;
+            --priority) PRIORITY="$2"; shift 2;;
+            --labels) LABELS="$2"; shift 2;;
+            --github-issue) ISSUE="$2"; shift 2;;
+            --assignee) ASSIGNEE="$2"; shift 2;;
+            --description) DESC="$2"; shift 2;;
+            *) echo "Unknown flag: $1"; exit 2;;
+          esac
+        done
+        [ -z "$TITLE" ] && echo "Error: --title is required" && exit 2
+        BODY="{\"title\":\"$TITLE\",\"priority\":\"$PRIORITY\",\"createdBy\":\"captain\""
+        [ -n "$DESC" ] && BODY="$BODY,\"description\":\"$DESC\""
+        [ -n "$ISSUE" ] && BODY="$BODY,\"githubIssue\":$ISSUE"
+        [ -n "$ASSIGNEE" ] && BODY="$BODY,\"assignee\":\"$ASSIGNEE\""
+        [ -n "$LABELS" ] && BODY="$BODY,\"labels\":[$(echo "$LABELS" | sed 's/[^,]*/\"&\"/g')]"
+        BODY="$BODY}"
+        json_post "/api/tasks" "$BODY"
+        ;;
+      list)
+        shift 2 2>/dev/null || true
+        QUERY=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --state) QUERY="${QUERY}&state=$2"; shift 2;;
+            --assignee) QUERY="${QUERY}&assignee=$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        json_get "/api/tasks?${QUERY#&}"
+        ;;
+      update)
+        shift 2
+        ID="" STATE="" NOTE="" ASSIGNEE="" PR=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --id) ID="$2"; shift 2;;
+            --state) STATE="$2"; shift 2;;
+            --note) NOTE="$2"; shift 2;;
+            --assignee) ASSIGNEE="$2"; shift 2;;
+            --pr) PR="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        BODY="{\"actor\":\"captain\""
+        [ -n "$STATE" ] && BODY="$BODY,\"state\":\"$STATE\""
+        [ -n "$NOTE" ] && BODY="$BODY,\"latestUpdate\":\"$NOTE\""
+        [ -n "$ASSIGNEE" ] && BODY="$BODY,\"assignee\":\"$ASSIGNEE\""
+        [ -n "$PR" ] && BODY="$BODY,\"githubPR\":$PR"
+        BODY="$BODY}"
+        json_patch "/api/tasks/$ID" "$BODY"
+        ;;
+      complete)
+        shift 2
+        ID="" NOTE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --id) ID="$2"; shift 2;;
+            --note) NOTE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        BODY="{\"actor\":\"captain\""
+        [ -n "$NOTE" ] && BODY="$BODY,\"notes\":\"$NOTE\""
+        BODY="$BODY}"
+        json_post "/api/tasks/$ID/complete" "$BODY"
+        ;;
+      *) echo "Usage: cc task <create|list|update|complete>"; exit 2;;
+    esac
+    ;;
+
+  # --- Board/status ---
+  board)
+    json_get "/api/board" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for c in d.get('columns', []):
+    print(f\"{c['label']}: {len(c['issues'])} issues\")
+" 2>/dev/null || json_get "/api/board"
+    ;;
+
+  status)
+    echo "=== Projects ==="
+    json_get "/api/registry"
+    echo ""
+    echo "=== Tasks ==="
+    json_get "/api/tasks"
+    ;;
+
+  # --- Start/stop gateway ---
+  start)
+    exec "$DIR/bin/command-center"
+    ;;
+
+  help|--help|-h)
+    echo "Command Center CLI"
+    echo ""
+    echo "Usage: cc <command> [subcommand] [flags]"
+    echo ""
+    echo "Commands:"
+    echo "  task create   --title <t> [--priority <p>] [--assignee <a>] [--github-issue <n>]"
+    echo "  task list     [--state <s>] [--assignee <a>]"
+    echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>]"
+    echo "  task complete --id <id> [--note <n>]"
+    echo "  board         Show project board summary"
+    echo "  status        Show overall status"
+    echo "  start         Start the Command Center gateway"
+    echo ""
+    echo "Environment:"
+    echo "  CC_PORT       Gateway port (default: 3300)"
+    echo "  CC_PROJECT    Project ID (default: companion)"
+    ;;
+
+  *) echo "Unknown command: $1. Run 'cc help' for usage."; exit 2;;
+esac

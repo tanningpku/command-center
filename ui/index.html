@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Command Center</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="cc-shell">
+    <!-- Header -->
+    <header class="cc-header">
+      <div class="cc-header-title">Command Center</div>
+      <div class="cc-header-actions">
+        <button id="settingsBtn" class="cc-header-btn" title="Settings">Settings</button>
+        <button id="chatBtn" class="cc-header-btn cc-header-btn-primary" title="Chat">Chat</button>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <nav class="cc-sidebar">
+      <!-- Project list -->
+      <div class="cc-project-section">
+        <div class="cc-section-label">Projects</div>
+        <div id="projectList" class="cc-project-list">
+          <div class="cc-loading">Loading projects...</div>
+        </div>
+      </div>
+
+      <!-- Tab navigation (shown when a project is selected) -->
+      <div id="tabNav" class="cc-tab-nav" style="display: none">
+        <div class="cc-section-label cc-section-label-tabs" id="selectedProjectLabel"></div>
+        <button class="cc-nav-tab active" data-tab="team">
+          <span class="cc-nav-icon">T</span> Team
+        </button>
+        <button class="cc-nav-tab" data-tab="board">
+          <span class="cc-nav-icon">B</span> Board
+        </button>
+        <button class="cc-nav-tab" data-tab="ops">
+          <span class="cc-nav-icon">O</span> Ops
+        </button>
+        <button class="cc-nav-tab" data-tab="threads">
+          <span class="cc-nav-icon">#</span> Threads
+        </button>
+        <button class="cc-nav-tab" data-tab="metrics">
+          <span class="cc-nav-icon">M</span> Metrics
+        </button>
+      </div>
+
+      <div class="cc-sidebar-footer">
+        <a href="/" class="cc-back-link">Back to Companion</a>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="cc-main">
+      <!-- No project selected -->
+      <div id="emptyState" class="cc-empty-state">
+        <div class="cc-empty-icon">--</div>
+        <h2>Engineering Command Center</h2>
+        <p>Select a project from the sidebar to get started.</p>
+      </div>
+
+      <!-- Team tab -->
+      <div id="tab-team" class="cc-tab-content" style="display: none">
+        <div class="cc-tab-header">
+          <h2>Team &amp; Agents</h2>
+          <span id="teamCount" class="cc-badge"></span>
+        </div>
+        <div id="teamGrid" class="cc-team-grid"></div>
+      </div>
+
+      <!-- Board tab -->
+      <div id="tab-board" class="cc-tab-content" style="display: none">
+        <div class="cc-tab-header">
+          <h2>Project Board</h2>
+          <span id="boardLastUpdated" class="cc-badge"></span>
+        </div>
+        <div id="boardColumns" class="cc-board">
+          <!-- Kanban columns rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Ops tab -->
+      <div id="tab-ops" class="cc-tab-content" style="display: none">
+        <div class="cc-tab-header">
+          <h2>Ops &amp; Reliability</h2>
+          <span id="opsLastUpdated" class="cc-badge"></span>
+        </div>
+        <div id="opsGrid" class="cc-ops-grid">
+          <!-- CI runs, deploy status rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Threads tab -->
+      <div id="tab-threads" class="cc-tab-content" style="display: none">
+        <div class="cc-tab-header">
+          <h2>Workstream Threads</h2>
+          <span id="threadCount" class="cc-badge"></span>
+        </div>
+        <div id="threadList" class="cc-thread-list"></div>
+      </div>
+
+      <!-- Metrics tab -->
+      <div id="tab-metrics" class="cc-tab-content" style="display: none">
+        <div class="cc-tab-header">
+          <h2>Metrics</h2>
+        </div>
+        <div id="metricsGrid" class="cc-metrics-grid"></div>
+      </div>
+    </main>
+
+    <!-- Captain bar -->
+    <footer class="cc-captain-bar">
+      <span class="cc-captain-label">Captain:</span>
+      <span id="captainMessage" class="cc-captain-message">Captain not yet configured</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

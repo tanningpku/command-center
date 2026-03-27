@@ -1,0 +1,5 @@
+name: "Companion"
+port: 3100
+repo: "tanningpku/companion"
+status: "active"
+description: "Personal AI assistant platform"
