@@ -1,0 +1,5 @@
+name: "Pokemon"
+port: 3201
+repo: ""
+status: "active"
+directory: "/home/ning/code/pokemon/"

@@ -12,6 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { URL } from "node:url";
+import { spawn, type ChildProcess } from "node:child_process";
 import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
 import { AgentStore } from "./agent-store.js";
@@ -68,6 +69,7 @@ export class Gateway {
   private readonly githubPlugins: Map<string, GitHubPlugin>;
   private readonly taskStores: Map<string, TaskStore>;
   private readonly agentStores: Map<string, AgentStore>;
+  private readonly instances: Map<string, ChildProcess> = new Map();
   private readonly uiDir: string;
   private readonly dataDir: string;
   private readonly configDir: string;
@@ -128,7 +130,75 @@ export class Gateway {
 
   stop(): void {
     for (const plugin of this.githubPlugins.values()) plugin.shutdown();
+    for (const [id, proc] of this.instances) {
+      console.log(`[gateway] Stopping instance ${id} (PID ${proc.pid})`);
+      proc.kill("SIGTERM");
+    }
+    this.instances.clear();
     this.server.close();
+  }
+
+  /**
+   * Spawn a harness instance for a project as a child process.
+   * Uses the companion harness (createInstance) with project-specific config.
+   */
+  spawnInstance(projectId: string): void {
+    const project = this.projects.get(projectId);
+    if (!project) {
+      console.warn(`[gateway] Cannot spawn instance: unknown project ${projectId}`);
+      return;
+    }
+    if (this.instances.has(projectId)) {
+      console.warn(`[gateway] Instance already running for ${projectId}`);
+      return;
+    }
+
+    // Find the companion harness entry point
+    const companionDist = process.env.COMPANION_DIST ?? path.resolve(__dirname, "../../companion/dist");
+    const entryPoint = path.join(companionDist, "index.js");
+    if (!fs.existsSync(entryPoint)) {
+      console.warn(`[gateway] Companion harness not found at ${entryPoint} — skipping instance spawn for ${projectId}`);
+      return;
+    }
+
+    // Get the agent store to find the captain
+    const agentStore = this.agentStores.get(projectId);
+    const agents = agentStore?.list() ?? [];
+    const captain = agents.find((a) => a.role.toLowerCase().includes("captain") || a.role.toLowerCase().includes("project lead"));
+
+    const env: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      UI_PORT: String(project.port),
+      MOCK_CLAUDE: process.env.MOCK_CLAUDE ?? "0",
+    };
+
+    console.log(`[gateway] Spawning harness instance for ${projectId} on port ${project.port}`);
+    const child = spawn("node", [entryPoint], {
+      cwd: project.repo ? path.dirname(project.repo) : process.cwd(),
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.stdout?.on("data", (data: Buffer) => {
+      const lines = data.toString().trim().split("\n");
+      for (const line of lines) {
+        console.log(`[${projectId}] ${line}`);
+      }
+    });
+
+    child.stderr?.on("data", (data: Buffer) => {
+      const lines = data.toString().trim().split("\n");
+      for (const line of lines) {
+        console.error(`[${projectId}:err] ${line}`);
+      }
+    });
+
+    child.on("exit", (code) => {
+      console.log(`[gateway] Instance ${projectId} exited (code ${code})`);
+      this.instances.delete(projectId);
+    });
+
+    this.instances.set(projectId, child);
   }
 
   /* ---------------------------------------------------------------- */
@@ -322,6 +392,10 @@ export class Gateway {
     this.projects.set(id, config);
 
     console.log(`[gateway] Created project '${id}' (port ${port}, captain: ${captainName})`);
+
+    // Spawn harness instance for the new project
+    this.spawnInstance(id);
+
     this.sendJson(res, 201, { project: config });
   }
 
