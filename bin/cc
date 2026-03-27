@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Command Center CLI
+# Command Center CLI — tools for Captain and project management
 set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CC_PORT="${CC_PORT:-3300}"
@@ -15,9 +15,13 @@ json_get() {
 json_patch() {
   curl -s -X PATCH "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -d "$2"
 }
+json_delete() {
+  curl -s -X DELETE "$BASE_URL$1" -H "X-Project-Id: $PROJECT"
+}
 
 case "${1:-help}" in
-  # --- Task commands ---
+
+  # ── Task commands ─────────────────────────────────────────────
   task)
     case "${2:-list}" in
       create)
@@ -93,11 +97,138 @@ case "${1:-help}" in
         BODY="$BODY}"
         json_post "/api/tasks/$ID/complete" "$BODY"
         ;;
-      *) echo "Usage: cc task <create|list|update|complete>"; exit 2;;
+      sync)
+        json_post "/api/tasks/sync-from-github" "{}"
+        ;;
+      *) echo "Usage: cc task <create|list|update|complete|sync>"; exit 2;;
     esac
     ;;
 
-  # --- Board/status ---
+  # ── Agent commands ────────────────────────────────────────────
+  agent)
+    case "${2:-list}" in
+      create)
+        shift 2
+        NAME="" ROLE="" STRENGTHS="" ID=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --name) NAME="$2"; shift 2;;
+            --role) ROLE="$2"; shift 2;;
+            --strengths) STRENGTHS="$2"; shift 2;;
+            --id) ID="$2"; shift 2;;
+            *) echo "Unknown flag: $1"; exit 2;;
+          esac
+        done
+        [ -z "$NAME" ] && echo "Error: --name is required" && exit 2
+        BODY="{\"name\":\"$NAME\""
+        [ -n "$ROLE" ] && BODY="$BODY,\"role\":\"$ROLE\""
+        [ -n "$ID" ] && BODY="$BODY,\"id\":\"$ID\""
+        [ -n "$STRENGTHS" ] && BODY="$BODY,\"strengths\":[$(echo "$STRENGTHS" | sed 's/[^,]*/\"&\"/g')]"
+        BODY="$BODY}"
+        json_post "/api/agents" "$BODY"
+        ;;
+      list)
+        json_get "/api/agents"
+        ;;
+      get)
+        shift 2
+        ID=""
+        while [[ $# -gt 0 ]]; do case "$1" in --id) ID="$2"; shift 2;; *) shift;; esac done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        json_get "/api/agents/$ID"
+        ;;
+      update)
+        shift 2
+        ID="" STATUS="" ROLE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --id) ID="$2"; shift 2;;
+            --status) STATUS="$2"; shift 2;;
+            --role) ROLE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        BODY="{"
+        [ -n "$STATUS" ] && BODY="$BODY\"status\":\"$STATUS\","
+        [ -n "$ROLE" ] && BODY="$BODY\"role\":\"$ROLE\","
+        BODY="${BODY%,}}"
+        json_patch "/api/agents/$ID" "$BODY"
+        ;;
+      delete)
+        shift 2
+        ID=""
+        while [[ $# -gt 0 ]]; do case "$1" in --id) ID="$2"; shift 2;; *) shift;; esac done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        json_delete "/api/agents/$ID"
+        ;;
+      *) echo "Usage: cc agent <create|list|get|update|delete>"; exit 2;;
+    esac
+    ;;
+
+  # ── Thread commands (proxied to Companion harness) ────────────
+  thread)
+    case "${2:-list}" in
+      list)
+        shift 2 2>/dev/null || true
+        LIMIT="${1:-20}"
+        json_get "/api/threads?limit=$LIMIT"
+        ;;
+      create)
+        shift 2
+        NAME="" PARTICIPANTS=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --name) NAME="$2"; shift 2;;
+            --participants) PARTICIPANTS="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$NAME" ] && echo "Error: --name is required" && exit 2
+        BODY="{\"title\":\"$NAME\""
+        [ -n "$PARTICIPANTS" ] && BODY="$BODY,\"participantIds\":[$(echo "$PARTICIPANTS" | sed 's/[^,]*/\"&\"/g')]"
+        BODY="$BODY}"
+        json_post "/api/threads" "$BODY"
+        ;;
+      *) echo "Usage: cc thread <list|create>"; exit 2;;
+    esac
+    ;;
+
+  # ── Message commands (proxied to Companion harness) ───────────
+  msg)
+    case "${2:-}" in
+      send)
+        shift 2
+        THREAD="" TEXT=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --thread) THREAD="$2"; shift 2;;
+            --text) TEXT="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$THREAD" ] && echo "Error: --thread is required" && exit 2
+        [ -z "$TEXT" ] && echo "Error: --text is required" && exit 2
+        json_post "/api/harness/message/send" "{\"thread_id\":\"$THREAD\",\"text\":\"$TEXT\",\"channel\":\"webui\"}"
+        ;;
+      history)
+        shift 2
+        THREAD="" LIMIT="20"
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --thread) THREAD="$2"; shift 2;;
+            --limit) LIMIT="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$THREAD" ] && echo "Error: --thread is required" && exit 2
+        json_get "/api/threads/$THREAD/messages?limit=$LIMIT"
+        ;;
+      *) echo "Usage: cc msg <send|history>"; exit 2;;
+    esac
+    ;;
+
+  # ── Board / Ops / Metrics ─────────────────────────────────────
   board)
     json_get "/api/board" | python3 -c "
 import json, sys
@@ -107,31 +238,100 @@ for c in d.get('columns', []):
 " 2>/dev/null || json_get "/api/board"
     ;;
 
+  ops)
+    json_get "/api/ops" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+builds = d.get('builds', [])
+pulls = d.get('pulls', [])
+print(f'CI Runs: {len(builds)}')
+for b in builds[:5]:
+    print(f\"  {b['name']}: {b.get('status','')} / {b.get('conclusion','')} ({b.get('age','')})\")
+print(f'Open PRs: {len(pulls)}')
+for p in pulls[:5]:
+    print(f\"  #{p['number']} {p['title']} by {p.get('author','')} ({p.get('age','')})\")
+" 2>/dev/null || json_get "/api/ops"
+    ;;
+
+  metrics)
+    json_get "/api/tasks" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+tasks = d.get('tasks', [])
+by_state = {}
+for t in tasks:
+    s = t.get('state', 'unknown')
+    by_state[s] = by_state.get(s, 0) + 1
+print(f'Total tasks: {len(tasks)}')
+for s, n in sorted(by_state.items()):
+    print(f'  {s}: {n}')
+" 2>/dev/null || json_get "/api/tasks"
+    ;;
+
   status)
     echo "=== Projects ==="
     json_get "/api/registry"
     echo ""
     echo "=== Tasks ==="
-    json_get "/api/tasks"
+    json_get "/api/tasks" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+tasks = d.get('tasks', [])
+print(f'{len(tasks)} tasks')
+for t in tasks[:5]:
+    print(f\"  {t['id']}: [{t['state']}] {t['title']}\")
+if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
+" 2>/dev/null
+    echo ""
+    echo "=== Agents ==="
+    json_get "/api/agents"
     ;;
 
-  # --- Start/stop gateway ---
+  # ── Gateway lifecycle ─────────────────────────────────────────
   start)
-    exec "$DIR/bin/command-center"
+    cd "$DIR"
+    # Build if needed
+    if [ ! -f dist/index.js ] || [ gateway.ts -nt dist/index.js ] || [ index.ts -nt dist/index.js ]; then
+      echo "[cc] Building..."
+      npx tsc -p tsconfig.json
+    fi
+    export CC_ROOT="$DIR"
+    exec node dist/index.js
     ;;
 
+  # ── Help ──────────────────────────────────────────────────────
   help|--help|-h)
     echo "Command Center CLI"
     echo ""
     echo "Usage: cc <command> [subcommand] [flags]"
     echo ""
-    echo "Commands:"
+    echo "Task Management:"
     echo "  task create   --title <t> [--priority <p>] [--assignee <a>] [--github-issue <n>]"
     echo "  task list     [--state <s>] [--assignee <a>]"
     echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>]"
     echo "  task complete --id <id> [--note <n>]"
-    echo "  board         Show project board summary"
+    echo "  task sync     Sync GitHub issues to tasks"
+    echo ""
+    echo "Agent Management:"
+    echo "  agent create  --name <n> [--role <r>] [--strengths <s1,s2>]"
+    echo "  agent list"
+    echo "  agent get     --id <id>"
+    echo "  agent update  --id <id> [--status <s>] [--role <r>]"
+    echo "  agent delete  --id <id>"
+    echo ""
+    echo "Threads & Messages (proxied to Companion):"
+    echo "  thread list   [limit]"
+    echo "  thread create --name <n> [--participants <p1,p2>]"
+    echo "  msg send      --thread <id> --text <t>"
+    echo "  msg history   --thread <id> [--limit <n>]"
+    echo ""
+    echo "Views:"
+    echo "  board         Show project board"
+    echo "  ops           Show CI builds and open PRs"
+    echo "  metrics       Show task metrics"
     echo "  status        Show overall status"
+    echo ""
+    echo "Gateway:"
     echo "  start         Start the Command Center gateway"
     echo ""
     echo "Environment:"

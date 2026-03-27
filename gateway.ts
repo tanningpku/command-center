@@ -14,6 +14,7 @@ import path from "node:path";
 import { URL } from "node:url";
 import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
+import { AgentStore } from "./agent-store.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -61,6 +62,7 @@ export class Gateway {
   private readonly projects: Map<string, ProjectConfig>;
   private readonly githubPlugins: Map<string, GitHubPlugin>;
   private readonly taskStores: Map<string, TaskStore>;
+  private readonly agentStores: Map<string, AgentStore>;
   private readonly uiDir: string;
   private readonly dataDir: string;
   private readonly port: number;
@@ -72,6 +74,7 @@ export class Gateway {
     this.projects = new Map(opts.projects.map((p) => [p.id, p]));
     this.githubPlugins = new Map();
     this.taskStores = new Map();
+    this.agentStores = new Map();
 
     this.server = http.createServer((req, res) => {
       void this.handleRequest(req, res);
@@ -79,12 +82,12 @@ export class Gateway {
   }
 
   async start(): Promise<void> {
-    // Initialize task stores for each project
+    // Initialize stores for each project
     fs.mkdirSync(this.dataDir, { recursive: true });
     for (const [id] of this.projects) {
-      const dbPath = path.join(this.dataDir, `${id}-tasks.db`);
-      this.taskStores.set(id, new TaskStore(dbPath));
-      console.log(`[gateway] Task store initialized for ${id}`);
+      this.taskStores.set(id, new TaskStore(path.join(this.dataDir, `${id}-tasks.db`)));
+      this.agentStores.set(id, new AgentStore(path.join(this.dataDir, `${id}-agents.db`)));
+      console.log(`[gateway] Stores initialized for ${id}`);
     }
 
     // Initialize GitHub plugins for projects with repos
@@ -163,6 +166,31 @@ export class Gateway {
         } else if (pathname === "/api/pulls") {
           this.sendJson(res, 200, { pulls: ghPlugin.getPulls(), lastUpdated: new Date().toISOString() });
         }
+        return;
+      }
+
+      // --- Agent endpoints (served by gateway) ---
+      if (pathname.startsWith("/api/agents")) {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const store = this.agentStores.get(projectId);
+        if (!store) { this.sendJson(res, 404, { error: `No agent store for project: ${projectId}` }); return; }
+        await this.handleAgentRequest(method, pathname, req, res, store);
+        return;
+      }
+
+      // --- Ops endpoint (GitHub Actions via plugin) ---
+      if (method === "GET" && pathname === "/api/ops") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const ghPlugin = this.githubPlugins.get(projectId);
+        const runs = ghPlugin?.getActions() ?? [];
+        const pulls = ghPlugin?.getPulls() ?? [];
+        this.sendJson(res, 200, {
+          builds: runs,
+          pulls: pulls.filter((p: any) => p.state === "OPEN"),
+          lastUpdated: new Date().toISOString(),
+        });
         return;
       }
 
@@ -370,6 +398,64 @@ export class Gateway {
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
   /* ---------------------------------------------------------------- */
+
+  /* ---------------------------------------------------------------- */
+  /*  Agent endpoints                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private async handleAgentRequest(
+    method: string,
+    pathname: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    store: AgentStore,
+  ): Promise<void> {
+    if (method === "GET" && pathname === "/api/agents") {
+      const url = new URL(req.url ?? "/", `http://localhost`);
+      const status = url.searchParams.get("status") ?? undefined;
+      this.sendJson(res, 200, { agents: store.list({ status }) });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/agents") {
+      const body = await this.readBody(req);
+      if (!body.name) { this.sendJson(res, 400, { error: "name is required" }); return; }
+      const agent = store.create({
+        id: body.id, name: body.name, role: body.role,
+        strengths: body.strengths, createdBy: body.createdBy ?? "captain",
+      });
+      this.sendJson(res, 201, agent);
+      return;
+    }
+
+    if (method === "GET" && pathname.startsWith("/api/agents/")) {
+      const id = pathname.split("/")[3];
+      if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }
+      const agent = store.get(id);
+      if (!agent) { this.sendJson(res, 404, { error: `Agent not found: ${id}` }); return; }
+      this.sendJson(res, 200, agent);
+      return;
+    }
+
+    if (method === "PATCH" && pathname.startsWith("/api/agents/")) {
+      const id = pathname.split("/")[3];
+      if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }
+      const body = await this.readBody(req);
+      const agent = store.update(id, body);
+      this.sendJson(res, 200, agent);
+      return;
+    }
+
+    if (method === "DELETE" && pathname.startsWith("/api/agents/")) {
+      const id = pathname.split("/")[3];
+      if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }
+      store.archive(id);
+      this.sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    this.sendJson(res, 404, { error: "Agent endpoint not found" });
+  }
 
   /* ---------------------------------------------------------------- */
   /*  Task endpoints                                                   */
