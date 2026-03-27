@@ -422,7 +422,7 @@ export class Gateway {
       if (!body.name) { this.sendJson(res, 400, { error: "name is required" }); return; }
       const agent = store.create({
         id: body.id, name: body.name, role: body.role,
-        strengths: body.strengths, createdBy: body.createdBy ?? "captain",
+        createdBy: body.createdBy ?? "captain",
       });
       this.sendJson(res, 201, agent);
       return;

@@ -109,12 +109,11 @@ case "${1:-help}" in
     case "${2:-list}" in
       create)
         shift 2
-        NAME="" ROLE="" STRENGTHS="" ID=""
+        NAME="" ROLE="" ID=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
             --name) NAME="$2"; shift 2;;
             --role) ROLE="$2"; shift 2;;
-            --strengths) STRENGTHS="$2"; shift 2;;
             --id) ID="$2"; shift 2;;
             *) echo "Unknown flag: $1"; exit 2;;
           esac
@@ -123,7 +122,6 @@ case "${1:-help}" in
         BODY="{\"name\":\"$NAME\""
         [ -n "$ROLE" ] && BODY="$BODY,\"role\":\"$ROLE\""
         [ -n "$ID" ] && BODY="$BODY,\"id\":\"$ID\""
-        [ -n "$STRENGTHS" ] && BODY="$BODY,\"strengths\":[$(echo "$STRENGTHS" | sed 's/[^,]*/\"&\"/g')]"
         BODY="$BODY}"
         json_post "/api/agents" "$BODY"
         ;;
@@ -313,7 +311,7 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     echo "  task sync     Sync GitHub issues to tasks"
     echo ""
     echo "Agent Management:"
-    echo "  agent create  --name <n> [--role <r>] [--strengths <s1,s2>]"
+    echo "  agent create  --name <n> [--role <r>] [--id <id>]"
     echo "  agent list"
     echo "  agent get     --id <id>"
     echo "  agent update  --id <id> [--status <s>] [--role <r>]"

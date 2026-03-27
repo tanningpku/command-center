@@ -10,7 +10,6 @@ export interface Agent {
   id: string;
   name: string;
   role: string;
-  strengths: string[];
   status: "active" | "running" | "stopped" | "archived";
   createdBy: string;
   createdAt: string;
@@ -27,7 +26,6 @@ export class AgentStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         role TEXT,
-        strengths TEXT,
         status TEXT NOT NULL DEFAULT 'active',
         created_by TEXT NOT NULL DEFAULT 'captain',
         created_at TEXT NOT NULL,
@@ -36,14 +34,13 @@ export class AgentStore {
     `);
   }
 
-  create(opts: { id?: string; name: string; role?: string; strengths?: string[]; createdBy?: string }): Agent {
+  create(opts: { id?: string; name: string; role?: string; createdBy?: string }): Agent {
     const id = opts.id ?? opts.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
     const now = new Date().toISOString();
     this.db.prepare(
-      `INSERT INTO agents (id, name, role, strengths, status, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
-    ).run(id, opts.name, opts.role ?? "", JSON.stringify(opts.strengths ?? []),
-      opts.createdBy ?? "captain", now, now);
+      `INSERT INTO agents (id, name, role, status, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+    ).run(id, opts.name, opts.role ?? "", opts.createdBy ?? "captain", now, now);
     return this.get(id)!;
   }
 
@@ -61,12 +58,11 @@ export class AgentStore {
       .map((r: any) => this.rowToAgent(r));
   }
 
-  update(id: string, opts: Partial<{ name: string; role: string; strengths: string[]; status: string }>): Agent {
+  update(id: string, opts: Partial<{ name: string; role: string; status: string }>): Agent {
     const sets: string[] = ["updated_at = ?"];
     const params: any[] = [new Date().toISOString()];
     if (opts.name) { sets.push("name = ?"); params.push(opts.name); }
     if (opts.role !== undefined) { sets.push("role = ?"); params.push(opts.role); }
-    if (opts.strengths) { sets.push("strengths = ?"); params.push(JSON.stringify(opts.strengths)); }
     if (opts.status) { sets.push("status = ?"); params.push(opts.status); }
     params.push(id);
     this.db.prepare(`UPDATE agents SET ${sets.join(", ")} WHERE id = ?`).run(...params);
@@ -80,7 +76,6 @@ export class AgentStore {
   private rowToAgent(row: any): Agent {
     return {
       id: row.id, name: row.name, role: row.role ?? "",
-      strengths: row.strengths ? JSON.parse(row.strengths) : [],
       status: row.status, createdBy: row.created_by,
       createdAt: row.created_at, updatedAt: row.updated_at,
     };
