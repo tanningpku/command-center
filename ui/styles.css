@@ -306,6 +306,21 @@ body {
   animation: cc-fadeIn 0.2s ease;
 }
 
+#tab-threads {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--cc-header-h) - var(--cc-captain-h) - 56px);
+}
+
+#tab-threads .cc-tab-header {
+  flex-shrink: 0;
+}
+
+#tab-threads .cc-threads-split {
+  flex: 1;
+  height: auto;
+}
+
 @keyframes cc-fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -322,6 +337,13 @@ body {
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+.cc-tab-header .cc-header-btn {
+  margin-left: auto;
+  font-size: 16px;
+  padding: 2px 10px;
+  line-height: 1;
 }
 
 .cc-badge {
@@ -1017,25 +1039,53 @@ body {
   cursor: not-allowed;
 }
 
-/* ── Thread Cards ──────────────────────────────────────────────── */
+/* ── Threads Split Layout ──────────────────────────────────────── */
+
+.cc-threads-split {
+  display: flex;
+  gap: 0;
+  height: calc(100vh - var(--cc-header-h) - var(--cc-captain-h) - 120px);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  overflow: hidden;
+  background: var(--cc-surface);
+}
+
+/* ── Thread Sidebar (left panel) ──────────────────────────────── */
+
+.cc-thread-sidebar {
+  width: 220px;
+  min-width: 180px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--cc-border);
+  overflow-y: auto;
+  background: var(--cc-surface);
+}
 
 .cc-thread-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 .cc-thread-card {
-  background: var(--cc-bg-card);
-  border: 1px solid var(--cc-border);
-  border-radius: 8px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: background var(--cc-transition);
+  border-bottom: 1px solid var(--cc-border-light);
 }
 
 .cc-thread-card:hover {
-  border-color: var(--cc-accent);
+  background: var(--cc-surface-hover);
+}
+
+.cc-thread-card.cc-thread-selected {
+  background: var(--cc-accent-bg);
+  border-left: 3px solid var(--cc-accent);
+}
+
+.cc-thread-card.cc-thread-selected .cc-thread-title {
+  color: var(--cc-accent);
 }
 
 .cc-thread-inactive {
@@ -1045,20 +1095,23 @@ body {
 .cc-thread-card-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cc-thread-icon {
   color: var(--cc-text-faint);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .cc-thread-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--cc-text);
-  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cc-thread-type {
@@ -1070,11 +1123,203 @@ body {
 }
 
 .cc-thread-card-meta {
-  display: flex;
-  gap: 12px;
-  margin-top: 6px;
+  font-size: 11px;
+  color: var(--cc-text-faint);
+  margin-top: 2px;
+  padding-left: 20px;
+}
+
+.cc-thread-sidebar-empty {
+  padding: 20px 14px;
+  color: var(--cc-text-faint);
   font-size: 12px;
+  text-align: center;
+}
+
+/* ── Chat Area (right panel) ──────────────────────────────────── */
+
+.cc-chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--cc-bg);
+}
+
+.cc-chat-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--cc-text-faint);
+  font-size: 13px;
+}
+
+.cc-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--cc-border);
+  background: var(--cc-surface);
+  flex-shrink: 0;
+}
+
+.cc-chat-thread-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--cc-text);
+}
+
+/* ── Chat Messages ────────────────────────────────────────────── */
+
+.cc-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cc-chat-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cc-chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cc-chat-messages::-webkit-scrollbar-thumb {
+  background: var(--cc-border);
+  border-radius: 3px;
+}
+
+.cc-chat-no-messages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--cc-text-faint);
+  font-size: 13px;
+}
+
+.cc-chat-error {
+  color: var(--cc-red);
+  font-size: 12px;
+  padding: 12px;
+}
+
+/* ── Chat Bubbles ─────────────────────────────────────────────── */
+
+.cc-message {
+  max-width: 75%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  word-wrap: break-word;
+}
+
+.cc-message-assistant {
+  align-self: flex-start;
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+}
+
+.cc-message-user {
+  align-self: flex-end;
+  background: #1f6feb;
+  border: 1px solid #1f6feb;
+}
+
+.cc-message-sender {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.cc-message-assistant .cc-message-sender {
   color: var(--cc-text-muted);
+}
+
+.cc-message-user .cc-message-sender {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.cc-message-text {
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.cc-message-assistant .cc-message-text {
+  color: var(--cc-text);
+}
+
+.cc-message-user .cc-message-text {
+  color: #fff;
+}
+
+.cc-message-time {
+  font-size: 10px;
+  margin-top: 4px;
+}
+
+.cc-message-assistant .cc-message-time {
+  color: var(--cc-text-faint);
+}
+
+.cc-message-user .cc-message-time {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── Chat Input Bar ───────────────────────────────────────────── */
+
+.cc-chat-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--cc-border);
+  background: var(--cc-surface);
+  flex-shrink: 0;
+}
+
+.cc-chat-input {
+  flex: 1;
+  background: var(--cc-bg);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  color: var(--cc-text);
+  font-family: var(--cc-font);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color var(--cc-transition);
+}
+
+.cc-chat-input:focus {
+  border-color: var(--cc-accent);
+}
+
+.cc-chat-input::placeholder {
+  color: var(--cc-text-faint);
+}
+
+.cc-chat-send-btn {
+  background: var(--cc-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--cc-radius-sm);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--cc-transition);
+  flex-shrink: 0;
+}
+
+.cc-chat-send-btn:hover {
+  background: var(--cc-accent-hover);
 }
 
 /* ── Metrics ───────────────────────────────────────────────────── */

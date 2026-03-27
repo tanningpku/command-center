@@ -102,8 +102,29 @@
         <div class="cc-tab-header">
           <h2>Workstream Threads</h2>
           <span id="threadCount" class="cc-badge"></span>
+          <button id="newThreadBtn" class="cc-header-btn" title="New Thread">+</button>
         </div>
-        <div id="threadList" class="cc-thread-list"></div>
+        <div class="cc-threads-split">
+          <!-- Left: thread sidebar -->
+          <div id="threadSidebar" class="cc-thread-sidebar">
+            <div id="threadList" class="cc-thread-list"></div>
+          </div>
+          <!-- Right: chat area -->
+          <div id="chatArea" class="cc-chat-area">
+            <div id="chatEmptyState" class="cc-chat-empty">
+              <p>Select a thread to start chatting.</p>
+            </div>
+            <div id="chatHeader" class="cc-chat-header" style="display: none">
+              <span class="cc-thread-icon">#</span>
+              <span id="chatThreadTitle" class="cc-chat-thread-title"></span>
+            </div>
+            <div id="chatMessages" class="cc-chat-messages" style="display: none"></div>
+            <div id="chatInputBar" class="cc-chat-input-bar" style="display: none">
+              <input id="chatInput" class="cc-chat-input" type="text" placeholder="Type a message..." autocomplete="off" />
+              <button id="chatSendBtn" class="cc-chat-send-btn">Send</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Metrics tab -->

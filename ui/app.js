@@ -10,6 +10,8 @@ const state = {
   activeTab: 'team',
   teamData: [],
   eventSource: null,
+  activeThreadId: null,
+  threads: [],
 };
 
 // ── DOM References ───────────────────────────────────────────────
@@ -65,6 +67,26 @@ async function apiCall(path) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Make a POST API call through the gateway proxy.
+ */
+async function apiPost(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.selectedProjectId) {
+    headers['X-Project-Id'] = state.selectedProjectId;
+  }
+  const res = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(data.error || `HTTP ${res.status}`);
   }
   return res.json();
 }
@@ -165,7 +187,8 @@ function showTab(tabName) {
   // Show selected tab
   const tabEl = document.getElementById(`tab-${tabName}`);
   if (tabEl) {
-    tabEl.style.display = 'block';
+    // Threads tab needs flex layout for the split panel
+    tabEl.style.display = tabName === 'threads' ? 'flex' : 'block';
   }
 
   // Load tab data
@@ -674,60 +697,215 @@ async function loadThreadsData() {
   try {
     const data = await apiCall('/api/threads?limit=50');
     const threads = data.threads || data || [];
+    state.threads = threads;
     threadCount.textContent = `${threads.length} thread${threads.length !== 1 ? 's' : ''}`;
 
     if (threads.length === 0) {
       threadList.innerHTML = `
-        <div class="cc-team-empty">
+        <div class="cc-thread-sidebar-empty">
           <p>No threads yet.</p>
-          <p style="font-size: 12px; color: var(--cc-text-faint);">
-            Create workstream threads to organize project discussions.
-          </p>
         </div>
       `;
+      showChatEmptyState();
       return;
     }
 
-    threadList.innerHTML = threads.map(thread => {
-      const title = thread.title || thread.id;
-      const type = thread.threadType || 'chat';
-      const updated = thread.updatedAt ? timeAgo(thread.updatedAt) : '';
-      const participantCount = thread.participantCount || '';
-      const isActive = thread.status === 'active';
+    renderThreadSidebar(threads);
 
-      return `
-        <div class="cc-thread-card ${isActive ? '' : 'cc-thread-inactive'}" data-thread-id="${escapeHtml(thread.id)}">
-          <div class="cc-thread-card-header">
-            <span class="cc-thread-icon">#</span>
-            <span class="cc-thread-title">${escapeHtml(title)}</span>
-            <span class="cc-thread-type">${escapeHtml(type)}</span>
-          </div>
-          <div class="cc-thread-card-meta">
-            ${updated ? `<span>Updated ${updated}</span>` : ''}
-            ${participantCount ? `<span>${participantCount} participants</span>` : ''}
-          </div>
-        </div>
-      `;
-    }).join('');
-    // Add click handlers to thread cards
-    threadList.addEventListener('click', (e) => {
-      const card = e.target.closest('.cc-thread-card');
-      if (!card) return;
-      const threadId = card.dataset.threadId;
-      if (threadId) {
-        const project = state.projects.find(p => p.id === state.selectedProjectId);
-        const projectPort = project ? project.port : 3100;
-        window.open(`http://localhost:${projectPort}/#thread=${threadId}`, '_blank');
-      }
-    });
+    // If we had an active thread, re-select it; otherwise show empty
+    if (state.activeThreadId && threads.find(t => t.id === state.activeThreadId)) {
+      selectThread(state.activeThreadId);
+    } else {
+      showChatEmptyState();
+    }
   } catch (err) {
     console.error('Failed to load threads:', err);
     threadList.innerHTML = `
-      <div class="cc-team-empty">
+      <div class="cc-thread-sidebar-empty">
         <p>Unable to load threads.</p>
-        <p style="font-size: 12px; color: var(--cc-text-faint);">${escapeHtml(err.message)}</p>
+        <p style="font-size: 11px; color: var(--cc-text-faint);">${escapeHtml(err.message)}</p>
       </div>
     `;
+  }
+}
+
+function renderThreadSidebar(threads) {
+  const threadList = document.getElementById('threadList');
+  threadList.innerHTML = threads.map(thread => {
+    const title = thread.title || thread.id;
+    const isSelected = thread.id === state.activeThreadId;
+    const isActive = thread.status === 'active';
+    const updated = thread.updatedAt ? timeAgo(thread.updatedAt) : '';
+
+    return `
+      <div class="cc-thread-card ${isSelected ? 'cc-thread-selected' : ''} ${isActive ? '' : 'cc-thread-inactive'}" data-thread-id="${escapeHtml(thread.id)}">
+        <div class="cc-thread-card-header">
+          <span class="cc-thread-icon">#</span>
+          <span class="cc-thread-title">${escapeHtml(title)}</span>
+        </div>
+        ${updated ? `<div class="cc-thread-card-meta"><span>${updated}</span></div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function showChatEmptyState() {
+  document.getElementById('chatEmptyState').style.display = 'flex';
+  document.getElementById('chatHeader').style.display = 'none';
+  document.getElementById('chatMessages').style.display = 'none';
+  document.getElementById('chatInputBar').style.display = 'none';
+}
+
+function showChatArea(title) {
+  document.getElementById('chatEmptyState').style.display = 'none';
+  document.getElementById('chatHeader').style.display = 'flex';
+  document.getElementById('chatMessages').style.display = 'flex';
+  document.getElementById('chatInputBar').style.display = 'flex';
+  document.getElementById('chatThreadTitle').textContent = title || '';
+}
+
+async function selectThread(threadId) {
+  state.activeThreadId = threadId;
+
+  // Update sidebar highlights
+  renderThreadSidebar(state.threads);
+
+  // Find thread info
+  const thread = state.threads.find(t => t.id === threadId);
+  const title = thread ? (thread.title || thread.id) : threadId;
+
+  showChatArea(title);
+  await loadChatMessages(threadId);
+}
+
+async function loadChatMessages(threadId) {
+  const chatMessages = document.getElementById('chatMessages');
+  chatMessages.innerHTML = `<div class="cc-loading">Loading messages...</div>`;
+
+  try {
+    const data = await apiCall(`/api/threads/${encodeURIComponent(threadId)}/messages?limit=50`);
+    const messages = data.messages || data || [];
+    renderChatMessages(messages);
+  } catch (err) {
+    console.error('Failed to load messages:', err);
+    chatMessages.innerHTML = `
+      <div class="cc-chat-error">Unable to load messages: ${escapeHtml(err.message)}</div>
+    `;
+  }
+}
+
+function renderChatMessages(messages) {
+  const chatMessages = document.getElementById('chatMessages');
+
+  if (messages.length === 0) {
+    chatMessages.innerHTML = `
+      <div class="cc-chat-no-messages">No messages yet. Start the conversation!</div>
+    `;
+    return;
+  }
+
+  chatMessages.innerHTML = messages.map(msg => renderChatBubble(msg)).join('');
+  scrollChatToBottom();
+}
+
+function renderChatBubble(msg) {
+  const role = msg.role || 'user';
+  const isAssistant = role === 'assistant';
+  const senderName = msg.sender || msg.assistantName || (isAssistant ? 'Captain' : 'You');
+  const text = msg.text || msg.content || '';
+  const time = msg.createdAt || msg.timestamp;
+  const timeStr = time ? formatMessageTime(time) : '';
+  const bubbleClass = isAssistant ? 'cc-message-assistant' : 'cc-message-user';
+
+  return `
+    <div class="cc-message ${bubbleClass}">
+      <div class="cc-message-sender">${escapeHtml(senderName)}</div>
+      <div class="cc-message-text">${escapeHtml(text)}</div>
+      ${timeStr ? `<div class="cc-message-time">${escapeHtml(timeStr)}</div>` : ''}
+    </div>
+  `;
+}
+
+function formatMessageTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return timeStr;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${timeStr}`;
+}
+
+function scrollChatToBottom() {
+  const chatMessages = document.getElementById('chatMessages');
+  requestAnimationFrame(() => {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  });
+}
+
+function appendChatMessage(msg) {
+  const chatMessages = document.getElementById('chatMessages');
+  // Remove "no messages" placeholder if present
+  const noMsgs = chatMessages.querySelector('.cc-chat-no-messages');
+  if (noMsgs) noMsgs.remove();
+
+  const div = document.createElement('div');
+  div.innerHTML = renderChatBubble(msg);
+  chatMessages.appendChild(div.firstElementChild);
+  scrollChatToBottom();
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text || !state.activeThreadId) return;
+
+  input.value = '';
+
+  // Optimistic append
+  appendChatMessage({
+    role: 'user',
+    sender: 'You',
+    text: text,
+    createdAt: new Date().toISOString(),
+  });
+
+  try {
+    await apiPost('/api/harness/message/send', {
+      thread_id: state.activeThreadId,
+      text: text,
+      channel: 'webui',
+    });
+  } catch (err) {
+    console.error('Failed to send message:', err);
+    // Append error indicator
+    appendChatMessage({
+      role: 'assistant',
+      sender: 'System',
+      text: `Failed to send message: ${err.message}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
+
+async function createNewThread() {
+  const title = prompt('Thread title:');
+  if (!title) return;
+
+  try {
+    const result = await apiPost('/api/threads', {
+      title: title,
+      participants: ['captain', 'ning'],
+    });
+    const newThread = result.thread || result;
+    // Reload thread list and select the new thread
+    await loadThreadsData();
+    if (newThread && newThread.id) {
+      selectThread(newThread.id);
+    }
+  } catch (err) {
+    console.error('Failed to create thread:', err);
+    alert(`Failed to create thread: ${err.message}`);
   }
 }
 
@@ -799,8 +977,23 @@ function handleSSEEvent(event) {
 
     case 'thread_created':
     case 'thread_updated':
-      // Will be used in Phase 3 when Threads tab is live
+      if (state.activeTab === 'threads') {
+        loadThreadsData();
+      }
       break;
+
+    case 'message_created':
+    case 'new_message': {
+      const msg = event.payload || event;
+      const msgThreadId = msg.threadId || msg.thread_id;
+      if (msgThreadId && msgThreadId === state.activeThreadId && state.activeTab === 'threads') {
+        // Only append assistant messages (user messages are optimistically added)
+        if (msg.role === 'assistant') {
+          appendChatMessage(msg);
+        }
+      }
+      break;
+    }
 
     default:
       break;
@@ -897,6 +1090,34 @@ dom.navTabs.forEach(btn => {
   btn.addEventListener('click', () => {
     showTab(btn.dataset.tab);
   });
+});
+
+// Thread sidebar click — select a thread
+document.getElementById('threadList').addEventListener('click', (e) => {
+  const card = e.target.closest('.cc-thread-card');
+  if (!card) return;
+  const threadId = card.dataset.threadId;
+  if (threadId) {
+    selectThread(threadId);
+  }
+});
+
+// Chat send button
+document.getElementById('chatSendBtn').addEventListener('click', () => {
+  sendChatMessage();
+});
+
+// Chat input — Enter to send
+document.getElementById('chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+
+// New thread button
+document.getElementById('newThreadBtn').addEventListener('click', () => {
+  createNewThread();
 });
 
 // Header button handlers
