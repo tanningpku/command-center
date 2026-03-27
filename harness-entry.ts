@@ -32,12 +32,18 @@ async function main(): Promise<void> {
   if (!fs.existsSync(configPath)) {
     fs.mkdirSync(configDir, { recursive: true });
     // Write minimal config
+    // Internal WS port = UI port + 10000 (e.g. 3201 → 13201)
+    const wsPort = port + 10000;
     fs.writeFileSync(configPath, JSON.stringify({
-      port: 0,
+      port: wsPort,
       backend: "claude",
       claude: {
         command: process.env.CLAUDE_BIN ?? "claude",
-        args: ["--dangerously-skip-permissions"],
+        args: [
+          "--sdk-url", `ws://localhost:${wsPort}/claude`,
+          "--dangerously-skip-permissions",
+          "-p", "Captain online — ready for work"
+        ],
         appendSystemPromptFile: path.resolve(agentDir, "kb/identity.md"),
       },
       sources: {},
