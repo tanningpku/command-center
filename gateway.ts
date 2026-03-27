@@ -316,7 +316,7 @@ export class Gateway {
     this.agentStores.set(id, agentStore);
 
     // Create a Captain agent
-    agentStore.create({ name: captainName, role: "captain", createdBy: "system" });
+    agentStore.create({ name: captainName, role: "Project lead — coordinates work, manages the team, triages issues", createdBy: "system", isCaptain: true });
 
     // Add to in-memory project map
     this.projects.set(id, config);
