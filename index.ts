@@ -47,6 +47,7 @@ async function main(): Promise<void> {
     projects,
     uiDir: UI_DIR,
     dataDir: DATA_DIR,
+    configDir: PROJECTS_DIR,
   });
 
   await gateway.start();

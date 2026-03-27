@@ -16,6 +16,9 @@ import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
 import { AgentStore } from "./agent-store.js";
 
+/** Directory where project YAML configs live (set during start) */
+let projectConfigDir = "";
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
@@ -37,6 +40,8 @@ export interface GatewayOptions {
   uiDir: string;
   /** Directory for data files (task DB, etc.) */
   dataDir: string;
+  /** Directory containing project YAML config files */
+  configDir: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -65,12 +70,14 @@ export class Gateway {
   private readonly agentStores: Map<string, AgentStore>;
   private readonly uiDir: string;
   private readonly dataDir: string;
+  private readonly configDir: string;
   private readonly port: number;
 
   constructor(opts: GatewayOptions) {
     this.port = opts.port;
     this.uiDir = opts.uiDir;
     this.dataDir = opts.dataDir;
+    this.configDir = opts.configDir;
     this.projects = new Map(opts.projects.map((p) => [p.id, p]));
     this.githubPlugins = new Map();
     this.taskStores = new Map();
@@ -138,6 +145,17 @@ export class Gateway {
       // --- Registry endpoints ---
       if (method === "GET" && pathname === "/api/registry") {
         this.handleRegistryList(res);
+        return;
+      }
+
+      // --- Project endpoints ---
+      if (method === "GET" && pathname === "/api/projects") {
+        this.handleRegistryList(res);
+        return;
+      }
+
+      if (method === "POST" && pathname === "/api/projects") {
+        await this.handleCreateProject(req, res);
         return;
       }
 
@@ -243,6 +261,68 @@ export class Gateway {
       status: p.status,
     }));
     this.sendJson(res, 200, { projects });
+  }
+
+  /**
+   * Create a new project: write YAML config, initialize stores, add to registry.
+   */
+  private async handleCreateProject(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await this.readBody(req);
+    const { directory, captainName } = body;
+
+    if (!directory || typeof directory !== "string") {
+      this.sendJson(res, 400, { error: "directory is required (e.g. /home/ning/code/my-project)" });
+      return;
+    }
+    if (!captainName || typeof captainName !== "string") {
+      this.sendJson(res, 400, { error: "captainName is required" });
+      return;
+    }
+
+    // Derive project ID from directory name
+    const dirName = path.basename(directory.replace(/\/+$/, ""));
+    const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
+    if (this.projects.has(id)) {
+      this.sendJson(res, 409, { error: `Project '${id}' already exists` });
+      return;
+    }
+
+    // Auto-assign next available port starting from 3200
+    const usedPorts = new Set(Array.from(this.projects.values()).map((p) => p.port));
+    let port = 3200;
+    while (usedPorts.has(port)) port++;
+
+    // Build project config
+    const name = dirName.charAt(0).toUpperCase() + dirName.slice(1);
+    const config: ProjectConfig = { id, name, port, repo: "", status: "active" };
+
+    // Write YAML config file
+    fs.mkdirSync(this.configDir, { recursive: true });
+    const yamlContent = [
+      `name: "${name}"`,
+      `port: ${port}`,
+      `repo: ""`,
+      `status: "active"`,
+      `directory: "${directory}"`,
+    ].join("\n") + "\n";
+    fs.writeFileSync(path.join(this.configDir, `${id}.yaml`), yamlContent, "utf-8");
+
+    // Initialize task and agent stores
+    fs.mkdirSync(this.dataDir, { recursive: true });
+    const taskStore = new TaskStore(path.join(this.dataDir, `${id}-tasks.db`));
+    const agentStore = new AgentStore(path.join(this.dataDir, `${id}-agents.db`));
+    this.taskStores.set(id, taskStore);
+    this.agentStores.set(id, agentStore);
+
+    // Create a Captain agent
+    agentStore.create({ name: captainName, role: "captain", createdBy: "system" });
+
+    // Add to in-memory project map
+    this.projects.set(id, config);
+
+    console.log(`[gateway] Created project '${id}' (port ${port}, captain: ${captainName})`);
+    this.sendJson(res, 201, { project: config });
   }
 
   private async handleHealthCheck(projectId: string, res: http.ServerResponse): Promise<void> {

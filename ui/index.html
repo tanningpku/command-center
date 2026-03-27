@@ -27,6 +27,11 @@
         </div>
       </div>
 
+      <!-- New project button -->
+      <div class="cc-new-project-wrapper">
+        <button id="newProjectBtn" class="cc-new-project-btn" title="New Project">+</button>
+      </div>
+
       <!-- Tab navigation (shown when a project is selected) -->
       <div id="tabNav" class="cc-tab-nav" style="display: none">
         <div class="cc-section-label cc-section-label-tabs" id="selectedProjectLabel"></div>
@@ -115,6 +120,27 @@
       <span class="cc-captain-label">Captain:</span>
       <span id="captainMessage" class="cc-captain-message">Captain not yet configured</span>
     </footer>
+  </div>
+
+  <!-- New Project Modal -->
+  <div id="newProjectModal" class="cc-modal-overlay" style="display: none">
+    <div class="cc-modal">
+      <div class="cc-modal-header">
+        <h3>New Project</h3>
+        <button id="modalCloseBtn" class="cc-modal-close">&times;</button>
+      </div>
+      <form id="newProjectForm" class="cc-modal-body">
+        <label class="cc-form-label" for="projectDir">Directory path</label>
+        <input id="projectDir" class="cc-form-input" type="text" placeholder="/home/ning/code/my-project" required />
+
+        <label class="cc-form-label" for="captainName">Captain name</label>
+        <input id="captainName" class="cc-form-input" type="text" placeholder="Captain" value="Captain" required />
+
+        <div id="newProjectError" class="cc-form-error" style="display: none"></div>
+
+        <button type="submit" class="cc-form-submit">Create Project</button>
+      </form>
+    </div>
   </div>
 
   <script src="app.js"></script>

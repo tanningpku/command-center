@@ -805,6 +805,79 @@ function handleSSEEvent(event) {
   }
 }
 
+// ── New Project Modal ─────────────────────────────────────────────
+
+function openNewProjectModal() {
+  const modal = document.getElementById('newProjectModal');
+  const errorEl = document.getElementById('newProjectError');
+  errorEl.style.display = 'none';
+  document.getElementById('projectDir').value = '';
+  document.getElementById('captainName').value = 'Captain';
+  modal.style.display = 'flex';
+  document.getElementById('projectDir').focus();
+}
+
+function closeNewProjectModal() {
+  document.getElementById('newProjectModal').style.display = 'none';
+}
+
+document.getElementById('newProjectBtn').addEventListener('click', openNewProjectModal);
+document.getElementById('modalCloseBtn').addEventListener('click', closeNewProjectModal);
+
+// Close modal on overlay click
+document.getElementById('newProjectModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeNewProjectModal();
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeNewProjectModal();
+});
+
+document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const directory = document.getElementById('projectDir').value.trim();
+  const captainName = document.getElementById('captainName').value.trim();
+  const errorEl = document.getElementById('newProjectError');
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+
+  if (!directory || !captainName) return;
+
+  errorEl.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Creating...';
+
+  try {
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory, captainName }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    // Success — close modal, reload projects, select the new one
+    closeNewProjectModal();
+    const newId = data.project?.id;
+    state.selectedProjectId = null; // Reset so loadProjects doesn't skip
+    await loadProjects();
+    if (newId) {
+      selectProject(newId);
+      showTab('threads');
+    }
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = 'block';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Create Project';
+  }
+});
+
 // ── Event Listeners ──────────────────────────────────────────────
 
 // Project selection
