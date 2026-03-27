@@ -100,6 +100,17 @@ export class Gateway {
       }
     }
 
+    // Auto-sync GitHub issues to tasks on startup
+    for (const [id, plugin] of this.githubPlugins) {
+      const store = this.taskStores.get(id);
+      if (store) {
+        const synced = this.syncGithubIssuesToTasks(plugin, store);
+        if (synced > 0) {
+          console.log(`[gateway] Auto-synced ${synced} GitHub issues to tasks for ${id}`);
+        }
+      }
+    }
+
     this.server.listen(this.port, () => {
       console.log(`[gateway] Command Center listening on http://localhost:${this.port}`);
     });
@@ -161,7 +172,7 @@ export class Gateway {
         if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
         const store = this.taskStores.get(projectId);
         if (!store) { this.sendJson(res, 404, { error: `No task store for project: ${projectId}` }); return; }
-        await this.handleTaskRequest(method, pathname, req, res, store);
+        await this.handleTaskRequest(method, pathname, req, res, store, projectId);
         return;
       }
 
@@ -370,6 +381,7 @@ export class Gateway {
     req: http.IncomingMessage,
     res: http.ServerResponse,
     store: TaskStore,
+    projectId: string,
   ): Promise<void> {
     if (method === "GET" && pathname === "/api/tasks") {
       const url = new URL(req.url ?? "/", `http://localhost`);
@@ -411,7 +423,54 @@ export class Gateway {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/tasks/sync-from-github") {
+      const ghPlugin = this.githubPlugins.get(projectId);
+      if (!ghPlugin) {
+        this.sendJson(res, 404, { error: "No GitHub plugin available for this project" });
+        return;
+      }
+      const synced = this.syncGithubIssuesToTasks(ghPlugin, store);
+      this.sendJson(res, 200, { synced });
+      return;
+    }
+
     this.sendJson(res, 404, { error: "Task endpoint not found" });
+  }
+
+  /**
+   * Sync open GitHub issues into the task store, skipping any that already exist.
+   * Returns the number of newly created tasks.
+   */
+  private syncGithubIssuesToTasks(ghPlugin: GitHubPlugin, store: TaskStore): number {
+    const issues = ghPlugin.getIssues();
+    let synced = 0;
+
+    for (const issue of issues) {
+      if (issue.state !== "OPEN") continue;
+
+      // Skip if a task already exists for this issue
+      if (store.findByGithubIssue(issue.number)) continue;
+
+      // Derive priority from labels
+      let priority: "critical" | "high" | "normal" | "low" = "normal";
+      const labelNames = issue.labels.map((l) => l.toLowerCase());
+      if (labelNames.includes("critical") || labelNames.includes("p0")) priority = "critical";
+      else if (labelNames.includes("high") || labelNames.includes("p1") || labelNames.includes("priority: high")) priority = "high";
+      else if (labelNames.includes("low") || labelNames.includes("p3") || labelNames.includes("priority: low")) priority = "low";
+
+      store.create({
+        title: issue.title,
+        description: `GitHub issue #${issue.number}`,
+        githubIssue: issue.number,
+        priority,
+        labels: issue.labels,
+        createdBy: "github-sync",
+        assignee: issue.assignees.length > 0 ? issue.assignees[0] : undefined,
+      });
+      synced++;
+    }
+
+    return synced;
   }
 
   private async readBody(req: http.IncomingMessage): Promise<Record<string, any>> {

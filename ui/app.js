@@ -294,19 +294,44 @@ function renderTeamCard(member) {
 
 const BOARD_COLUMNS = ['Backlog', 'In Progress', 'In Review', 'Done'];
 
+// Task-based board column mapping (task states -> board columns)
+const TASK_STATE_TO_COLUMN = {
+  created: 'Backlog',
+  assigned: 'In Progress',
+  in_progress: 'In Progress',
+  blocked: 'In Progress',
+  in_review: 'In Review',
+  qa: 'In Review',
+  done: 'Done',
+  cancelled: 'Done',
+};
+
 async function loadBoardData() {
   if (!state.selectedProjectId) return;
 
   dom.boardColumns.innerHTML = `<div class="cc-loading">Loading board...</div>`;
 
   try {
+    // Try tasks first — if tasks exist, render task-based board
+    const taskData = await apiCall('/api/tasks');
+    const tasks = taskData.tasks || [];
+
+    if (tasks.length > 0) {
+      renderBoardFromTasks(tasks);
+      dom.boardLastUpdated.textContent = `Updated ${timeAgo(new Date().toISOString())}`;
+      return;
+    }
+  } catch {
+    // Tasks endpoint failed — fall through to GitHub issues
+  }
+
+  try {
+    // Fallback: raw GitHub issues board
     const data = await apiCall('/api/board');
-    // The board endpoint returns pre-classified columns from the GitHub plugin
     if (data.columns) {
       renderBoardFromColumns(data.columns);
       dom.boardLastUpdated.textContent = data.lastUpdated ? `Updated ${timeAgo(data.lastUpdated)}` : '';
     } else {
-      // Fallback: flat issue list, classify client-side
       const issues = data.issues || data || [];
       renderBoard(issues);
       dom.boardLastUpdated.textContent = `Updated ${timeAgo(new Date().toISOString())}`;
@@ -316,6 +341,94 @@ async function loadBoardData() {
     renderBoard([]);
     dom.boardLastUpdated.textContent = 'Unable to load';
   }
+}
+
+function renderBoardFromTasks(tasks) {
+  const columns = {};
+  BOARD_COLUMNS.forEach(col => columns[col] = []);
+
+  tasks.forEach(task => {
+    const col = TASK_STATE_TO_COLUMN[task.state] || 'Backlog';
+    if (columns[col]) {
+      columns[col].push(task);
+    } else {
+      columns['Backlog'].push(task);
+    }
+  });
+
+  dom.boardColumns.innerHTML = BOARD_COLUMNS.map(colName => {
+    const cards = columns[colName];
+    const cardHtml = cards.length === 0
+      ? `<div class="cc-board-empty">No tasks</div>`
+      : cards.map(task => renderTaskCard(task)).join('');
+
+    return `
+      <div class="cc-board-column">
+        <div class="cc-board-column-header">
+          <span class="cc-board-column-title">${escapeHtml(colName)}</span>
+          <span class="cc-board-column-count">${cards.length}</span>
+        </div>
+        <div class="cc-board-card-list">
+          ${cardHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function taskStateColor(taskState) {
+  const colors = {
+    created: '#8b949e',
+    assigned: '#d29922',
+    in_progress: '#d29922',
+    blocked: '#f85149',
+    in_review: '#a371f7',
+    qa: '#a371f7',
+    done: '#3fb950',
+    cancelled: '#8b949e',
+  };
+  return colors[taskState] || '#8b949e';
+}
+
+function taskPriorityIndicator(priority) {
+  const indicators = {
+    critical: '<span class="cc-task-priority cc-priority-critical" title="Critical">!!!</span>',
+    high: '<span class="cc-task-priority cc-priority-high" title="High">!!</span>',
+    normal: '',
+    low: '<span class="cc-task-priority cc-priority-low" title="Low">-</span>',
+  };
+  return indicators[priority] || '';
+}
+
+function renderTaskCard(task) {
+  const stateColor = taskStateColor(task.state);
+  const stateLabel = (task.state || '').replace(/_/g, ' ');
+  const priorityHtml = taskPriorityIndicator(task.priority);
+  const assigneeHtml = task.assignee
+    ? `<span class="cc-board-assignees">${escapeHtml(task.assignee)}</span>`
+    : '';
+  const ghLinkHtml = task.githubIssue
+    ? `<span class="cc-task-gh-link" title="GitHub issue #${task.githubIssue}">#${task.githubIssue}</span>`
+    : '';
+  const labelsHtml = (task.labels || []).map(label =>
+    `<span class="cc-board-label">${escapeHtml(label)}</span>`
+  ).join('');
+
+  return `
+    <div class="cc-board-card">
+      <div class="cc-board-card-top">
+        <span class="cc-board-card-number">${escapeHtml(task.id)}</span>
+        ${priorityHtml}
+        ${ghLinkHtml}
+      </div>
+      <div class="cc-board-card-title">${escapeHtml(task.title)}</div>
+      <div class="cc-board-card-state" style="color: ${stateColor}; border-color: ${stateColor};">
+        ${escapeHtml(stateLabel)}
+      </div>
+      ${labelsHtml ? `<div class="cc-board-card-labels">${labelsHtml}</div>` : ''}
+      ${assigneeHtml ? `<div class="cc-board-card-footer">${assigneeHtml}</div>` : ''}
+    </div>
+  `;
 }
 
 function renderBoardFromColumns(columns) {
@@ -528,7 +641,11 @@ async function loadMetricsData() {
       { label: 'In Progress', value: inProgressIssues, color: '#d29922' },
       { label: 'In Review', value: inReviewIssues, color: 'var(--cc-accent)' },
       { label: 'Done', value: doneIssues, color: 'var(--cc-text-muted)' },
-      { label: 'Active Threads', value: threads.filter(t => t.status === 'active').length, color: 'var(--cc-accent)' },
+      { label: 'Active Threads (7d)', value: threads.filter(t => {
+        if (!t.updatedAt) return false;
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        return new Date(t.updatedAt).getTime() > sevenDaysAgo;
+      }).length, color: 'var(--cc-accent)' },
     ];
 
     metricsGrid.innerHTML = metrics.map(m => `
@@ -579,7 +696,7 @@ async function loadThreadsData() {
       const isActive = thread.status === 'active';
 
       return `
-        <div class="cc-thread-card ${isActive ? '' : 'cc-thread-inactive'}">
+        <div class="cc-thread-card ${isActive ? '' : 'cc-thread-inactive'}" data-thread-id="${escapeHtml(thread.id)}">
           <div class="cc-thread-card-header">
             <span class="cc-thread-icon">#</span>
             <span class="cc-thread-title">${escapeHtml(title)}</span>
@@ -592,6 +709,15 @@ async function loadThreadsData() {
         </div>
       `;
     }).join('');
+    // Add click handlers to thread cards
+    threadList.addEventListener('click', (e) => {
+      const card = e.target.closest('.cc-thread-card');
+      if (!card) return;
+      const threadId = card.dataset.threadId;
+      if (threadId) {
+        window.open(`http://localhost:3100/#thread=${threadId}`, '_blank');
+      }
+    });
   } catch (err) {
     console.error('Failed to load threads:', err);
     threadList.innerHTML = `
@@ -696,6 +822,15 @@ dom.navTabs.forEach(btn => {
   btn.addEventListener('click', () => {
     showTab(btn.dataset.tab);
   });
+});
+
+// Header button handlers
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  alert('Settings panel coming soon. Configuration will be available in a future release.');
+});
+
+document.getElementById('chatBtn').addEventListener('click', () => {
+  window.open('http://localhost:3100', '_blank');
 });
 
 // Keyboard shortcuts

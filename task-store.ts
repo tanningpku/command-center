@@ -95,6 +95,11 @@ export class TaskStore {
     return row ? this.rowToTask(row) : null;
   }
 
+  findByGithubIssue(issueNumber: number): Task | null {
+    const row = this.db.prepare(`SELECT * FROM tasks WHERE github_issue = ?`).get(issueNumber) as any;
+    return row ? this.rowToTask(row) : null;
+  }
+
   list(opts?: { state?: string; assignee?: string; limit?: number }): Task[] {
     const conds: string[] = [];
     const params: any[] = [];
