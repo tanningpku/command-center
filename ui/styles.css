@@ -121,6 +121,134 @@ body {
   color: #fff;
 }
 
+/* ── Header Left (title + project switcher) ────────────────────── */
+
+.cc-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ── Project Switcher (header dropdown) ────────────────────────── */
+
+.cc-project-switcher {
+  position: relative;
+}
+
+.cc-project-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  color: var(--cc-text-secondary);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--cc-transition);
+  max-width: 200px;
+}
+
+.cc-project-switcher-btn:hover {
+  border-color: var(--cc-text-muted);
+  background: var(--cc-surface-hover);
+}
+
+.cc-project-switcher-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-project-switcher-chevron {
+  font-size: 9px;
+  color: var(--cc-text-faint);
+  flex-shrink: 0;
+}
+
+.cc-project-switcher-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 50;
+  padding: 4px;
+  animation: cc-fadeIn 0.15s ease;
+}
+
+.cc-project-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cc-project-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--cc-radius-sm);
+  cursor: pointer;
+  transition: background var(--cc-transition);
+  font-size: 13px;
+}
+
+.cc-project-dropdown-item:hover {
+  background: var(--cc-surface-hover);
+}
+
+.cc-project-dropdown-item.active {
+  background: var(--cc-accent-bg);
+}
+
+.cc-project-dropdown-item.active .cc-project-dropdown-name {
+  color: var(--cc-accent);
+}
+
+.cc-project-dropdown-name {
+  color: var(--cc-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-project-dropdown-divider {
+  height: 1px;
+  background: var(--cc-border);
+  margin: 4px 0;
+}
+
+.cc-project-dropdown-new {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--cc-text-muted);
+  font-size: 12px;
+  padding: 7px 10px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--cc-radius-sm);
+  transition: all var(--cc-transition);
+}
+
+.cc-project-dropdown-new:hover {
+  background: var(--cc-surface-hover);
+  color: var(--cc-accent);
+}
+
+.cc-project-dropdown-empty {
+  color: var(--cc-text-faint);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
 /* ── Sidebar ────────────────────────────────────────────────────── */
 .cc-sidebar {
   background: var(--cc-surface);
@@ -139,50 +267,7 @@ body {
   padding: 12px 16px 8px;
 }
 
-.cc-section-label-tabs {
-  color: var(--cc-text-secondary);
-  font-size: 12px;
-  text-transform: none;
-  letter-spacing: normal;
-  padding: 16px 16px 8px;
-  border-top: 1px solid var(--cc-border);
-}
-
-/* ── Project List ───────────────────────────────────────────────── */
-.cc-project-section {
-  flex-shrink: 0;
-}
-
-.cc-project-list {
-  display: flex;
-  flex-direction: column;
-  padding: 0 8px 8px;
-  gap: 2px;
-}
-
-.cc-project-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--cc-radius-sm);
-  cursor: pointer;
-  transition: background var(--cc-transition);
-  border: 1px solid transparent;
-}
-
-.cc-project-card:hover {
-  background: var(--cc-surface-hover);
-}
-
-.cc-project-card.active {
-  background: var(--cc-accent-bg);
-  border-color: var(--cc-accent);
-}
-
-.cc-project-card.active .cc-project-name {
-  color: var(--cc-accent);
-}
+/* ── Project Dot (shared between dropdown items) ───────────────── */
 
 .cc-project-dot {
   width: 8px;
@@ -204,29 +289,13 @@ body {
   background: var(--cc-red);
 }
 
-.cc-project-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--cc-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cc-project-port {
-  font-size: 11px;
-  color: var(--cc-text-faint);
-  font-family: var(--cc-font-mono);
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
 /* ── Tab Navigation ─────────────────────────────────────────────── */
 .cc-tab-nav {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  padding-top: 12px;
 }
 
 .cc-nav-tab {
@@ -1061,30 +1130,6 @@ body {
   .cc-captain-bar {
     grid-column: 1;
   }
-}
-
-/* ── New Project Button ─────────────────────────────────────────── */
-.cc-new-project-wrapper {
-  padding: 4px 8px 8px;
-}
-
-.cc-new-project-btn {
-  width: 100%;
-  background: transparent;
-  border: 1px dashed var(--cc-border);
-  border-radius: var(--cc-radius-sm);
-  color: var(--cc-text-faint);
-  font-size: 18px;
-  font-weight: 500;
-  padding: 6px 0;
-  cursor: pointer;
-  transition: all var(--cc-transition);
-}
-
-.cc-new-project-btn:hover {
-  border-color: var(--cc-accent);
-  color: var(--cc-accent);
-  background: var(--cc-accent-bg);
 }
 
 /* ── Modal ──────────────────────────────────────────────────────── */
