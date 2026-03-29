@@ -17,9 +17,11 @@ const state = {
 // ── DOM References ───────────────────────────────────────────────
 
 const dom = {
-  projectList:        document.getElementById('projectList'),
+  projectSwitcherBtn:  document.getElementById('projectSwitcherBtn'),
+  projectSwitcherName: document.getElementById('projectSwitcherName'),
+  projectDropdown:     document.getElementById('projectSwitcherDropdown'),
+  projectDropdownList: document.getElementById('projectDropdownList'),
   tabNav:             document.getElementById('tabNav'),
-  selectedProjectLabel: document.getElementById('selectedProjectLabel'),
   emptyState:         document.getElementById('emptyState'),
   teamGrid:           document.getElementById('teamGrid'),
   teamCount:          document.getElementById('teamCount'),
@@ -108,7 +110,7 @@ async function loadProjects() {
   try {
     const data = await fetchRegistry();
     state.projects = data.projects || data || [];
-    renderProjectList();
+    renderProjectDropdown();
 
     // Auto-select first project
     if (state.projects.length > 0 && !state.selectedProjectId) {
@@ -116,48 +118,57 @@ async function loadProjects() {
     }
   } catch (err) {
     console.error('Failed to load projects:', err);
-    dom.projectList.innerHTML = `
-      <div class="cc-loading">Unable to reach gateway. Retrying...</div>
-    `;
+    dom.projectSwitcherName.textContent = 'Connecting...';
     // Retry after 5s
     setTimeout(loadProjects, 5000);
   }
 }
 
-function renderProjectList() {
+function renderProjectDropdown() {
   if (state.projects.length === 0) {
-    dom.projectList.innerHTML = `
-      <div class="cc-loading">No projects registered.</div>
+    dom.projectDropdownList.innerHTML = `
+      <div class="cc-project-dropdown-empty">No projects registered.</div>
     `;
     return;
   }
 
-  dom.projectList.innerHTML = state.projects.map(project => {
+  dom.projectDropdownList.innerHTML = state.projects.map(project => {
     const isActive = project.id === state.selectedProjectId;
     const statusClass = project.status || 'running';
     return `
-      <div class="cc-project-card ${isActive ? 'active' : ''}"
+      <div class="cc-project-dropdown-item ${isActive ? 'active' : ''}"
            data-project-id="${escapeHtml(project.id)}">
         <span class="cc-project-dot ${escapeHtml(statusClass)}"></span>
-        <span class="cc-project-name">${escapeHtml(project.name)}</span>
-        <span class="cc-project-port">${project.port || ''}</span>
+        <span class="cc-project-dropdown-name">${escapeHtml(project.name)}</span>
       </div>
     `;
   }).join('');
 }
 
+function toggleProjectDropdown() {
+  const isOpen = dom.projectDropdown.style.display !== 'none';
+  dom.projectDropdown.style.display = isOpen ? 'none' : 'block';
+}
+
+function closeProjectDropdown() {
+  dom.projectDropdown.style.display = 'none';
+}
+
 function selectProject(projectId) {
   state.selectedProjectId = projectId;
 
-  // Update project list highlights
-  renderProjectList();
+  // Update dropdown highlights and close it
+  renderProjectDropdown();
+  closeProjectDropdown();
 
   // Find the project info
   const project = state.projects.find(p => p.id === projectId);
 
-  // Show tab nav with project name
+  // Update switcher button text
+  dom.projectSwitcherName.textContent = project ? project.name : projectId;
+
+  // Show tab nav
   dom.tabNav.style.display = 'flex';
-  dom.selectedProjectLabel.textContent = project ? project.name : projectId;
 
   // Hide empty state
   dom.emptyState.style.display = 'none';
@@ -1199,13 +1210,24 @@ document.getElementById('agentKbViewerClose').addEventListener('click', () => {
   document.getElementById('agentKbViewer').style.display = 'none';
 });
 
-// Project selection
-dom.projectList.addEventListener('click', (e) => {
-  const card = e.target.closest('.cc-project-card');
-  if (!card) return;
-  const projectId = card.dataset.projectId;
-  if (projectId) {
-    selectProject(projectId);
+// Project switcher dropdown toggle
+dom.projectSwitcherBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleProjectDropdown();
+});
+
+// Project selection from dropdown
+dom.projectDropdownList.addEventListener('click', (e) => {
+  const item = e.target.closest('.cc-project-dropdown-item');
+  if (!item) return;
+  const projectId = item.dataset.projectId;
+  if (projectId) selectProject(projectId);
+});
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.cc-project-switcher')) {
+    closeProjectDropdown();
   }
 });
 

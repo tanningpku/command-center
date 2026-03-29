@@ -10,7 +10,20 @@
   <div class="cc-shell">
     <!-- Header -->
     <header class="cc-header">
-      <div class="cc-header-title">Command Center</div>
+      <div class="cc-header-left">
+        <div class="cc-header-title">Command Center</div>
+        <div class="cc-project-switcher">
+          <button id="projectSwitcherBtn" class="cc-project-switcher-btn">
+            <span id="projectSwitcherName" class="cc-project-switcher-name">No project</span>
+            <span class="cc-project-switcher-chevron">&#9662;</span>
+          </button>
+          <div id="projectSwitcherDropdown" class="cc-project-switcher-dropdown" style="display: none">
+            <div id="projectDropdownList" class="cc-project-dropdown-list"></div>
+            <div class="cc-project-dropdown-divider"></div>
+            <button id="newProjectBtn" class="cc-project-dropdown-new">+ New Project</button>
+          </div>
+        </div>
+      </div>
       <div class="cc-header-actions">
         <button id="settingsBtn" class="cc-header-btn" title="Settings">Settings</button>
         <button id="chatBtn" class="cc-header-btn cc-header-btn-primary" title="Chat">Chat</button>
@@ -19,22 +32,8 @@
 
     <!-- Sidebar -->
     <nav class="cc-sidebar">
-      <!-- Project list -->
-      <div class="cc-project-section">
-        <div class="cc-section-label">Projects</div>
-        <div id="projectList" class="cc-project-list">
-          <div class="cc-loading">Loading projects...</div>
-        </div>
-      </div>
-
-      <!-- New project button -->
-      <div class="cc-new-project-wrapper">
-        <button id="newProjectBtn" class="cc-new-project-btn" title="New Project">+</button>
-      </div>
-
       <!-- Tab navigation (shown when a project is selected) -->
       <div id="tabNav" class="cc-tab-nav" style="display: none">
-        <div class="cc-section-label cc-section-label-tabs" id="selectedProjectLabel"></div>
         <button class="cc-nav-tab active" data-tab="team">
           <span class="cc-nav-icon">T</span> Team
         </button>
