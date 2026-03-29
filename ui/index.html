@@ -73,6 +73,34 @@
           <span id="teamCount" class="cc-badge"></span>
         </div>
         <div id="teamGrid" class="cc-team-grid"></div>
+
+        <!-- Agent detail panel (shown when clicking a team card) -->
+        <div id="agentDetailPanel" class="cc-agent-detail" style="display: none">
+          <div class="cc-agent-detail-header">
+            <button id="agentDetailBack" class="cc-agent-detail-back">&larr; Back</button>
+            <span id="agentDetailName" class="cc-agent-detail-name"></span>
+            <span id="agentDetailStatus" class="cc-agent-detail-status-badge"></span>
+          </div>
+          <div id="agentDetailRole" class="cc-agent-detail-role"></div>
+
+          <div class="cc-agent-detail-section">
+            <h3>System Prompt</h3>
+            <pre id="agentDetailIdentity" class="cc-agent-detail-code"></pre>
+          </div>
+
+          <div class="cc-agent-detail-section">
+            <h3>Knowledge Base</h3>
+            <div id="agentKbList" class="cc-agent-kb-list"></div>
+          </div>
+
+          <div id="agentKbViewer" class="cc-agent-detail-section" style="display: none">
+            <div class="cc-agent-kb-viewer-header">
+              <h3 id="agentKbViewerTitle"></h3>
+              <button id="agentKbViewerClose" class="cc-agent-detail-back">Close</button>
+            </div>
+            <pre id="agentKbViewerContent" class="cc-agent-detail-code"></pre>
+          </div>
+        </div>
       </div>
 
       <!-- Board tab -->

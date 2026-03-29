@@ -184,6 +184,13 @@ function showTab(tabName) {
     el.style.display = 'none';
   });
 
+  // Reset agent detail panel when switching tabs
+  const detailPanel = document.getElementById('agentDetailPanel');
+  if (detailPanel) {
+    detailPanel.style.display = 'none';
+    dom.teamGrid.style.display = '';
+  }
+
   // Show selected tab
   const tabEl = document.getElementById(`tab-${tabName}`);
   if (tabEl) {
@@ -223,9 +230,9 @@ async function loadTeamData() {
   dom.teamGrid.innerHTML = `<div class="cc-loading">Loading team...</div>`;
 
   try {
-    const data = await apiCall('/api/assistants');
-    const assistants = data.assistants || data || [];
-    state.teamData = assistants;
+    const data = await apiCall('/api/agents');
+    const agents = data.agents || data || [];
+    state.teamData = agents;
     renderTeam();
   } catch (err) {
     console.error('Failed to load team:', err);
@@ -282,9 +289,10 @@ function renderTeamCard(member) {
   const status = member.status || 'offline';
   const statusClass = status === 'online' || status === 'active' ? 'cc-status-online' : 'cc-status-offline';
   const statusLabel = status === 'online' || status === 'active' ? 'Online' : 'Offline';
+  const role = member.role || '';
 
   return `
-    <div class="cc-team-card">
+    <div class="cc-team-card cc-team-card-clickable" data-agent-id="${escapeHtml(member.id)}">
       <div class="cc-team-card-header">
         <div class="cc-avatar ${avatarClass}">${escapeHtml(initial)}</div>
         <div>
@@ -292,7 +300,8 @@ function renderTeamCard(member) {
           <div class="cc-team-card-type">${escapeHtml(typeLabel)}</div>
         </div>
       </div>
-      ${member.description ? `<div class="cc-team-detail" style="margin-bottom: 4px;">${escapeHtml(member.description)}</div>` : ''}
+      ${role ? `<div class="cc-team-card-role">${escapeHtml(role)}</div>` : ''}
+      ${member.description && member.description !== role ? `<div class="cc-team-detail" style="margin-bottom: 4px;">${escapeHtml(member.description)}</div>` : ''}
       <div class="cc-team-card-status ${statusClass}">
         <span class="cc-status-dot"></span>
         ${escapeHtml(statusLabel)}
@@ -311,6 +320,96 @@ function renderTeamCard(member) {
       </div>
     </div>
   `;
+}
+
+// ── Agent Detail Panel ──────────────────────────────────────────
+
+function showAgentDetail(agentId) {
+  const member = state.teamData.find(m => m.id === agentId);
+  if (!member) return;
+
+  // Hide grid, show detail panel
+  dom.teamGrid.style.display = 'none';
+  const panel = document.getElementById('agentDetailPanel');
+  panel.style.display = 'block';
+
+  // Populate header
+  document.getElementById('agentDetailName').textContent = member.name || member.id;
+  const statusBadge = document.getElementById('agentDetailStatus');
+  const status = member.status || 'offline';
+  const isOnline = status === 'online' || status === 'active';
+  statusBadge.textContent = isOnline ? 'Online' : 'Offline';
+  statusBadge.className = `cc-agent-detail-status-badge ${isOnline ? 'cc-status-online' : 'cc-status-offline'}`;
+
+  // Role
+  const roleEl = document.getElementById('agentDetailRole');
+  roleEl.textContent = member.role || '';
+  roleEl.style.display = member.role ? 'block' : 'none';
+
+  // Load KB identity and file list
+  loadAgentIdentity(agentId);
+  loadAgentKbList(agentId);
+
+  // Hide KB viewer if open
+  document.getElementById('agentKbViewer').style.display = 'none';
+}
+
+function hideAgentDetail() {
+  document.getElementById('agentDetailPanel').style.display = 'none';
+  dom.teamGrid.style.display = '';
+}
+
+async function loadAgentIdentity(agentId) {
+  const el = document.getElementById('agentDetailIdentity');
+  el.textContent = 'Loading...';
+
+  try {
+    const data = await apiCall(`/api/kb/read?file=identity.md&agent=${encodeURIComponent(agentId)}`);
+    el.textContent = data.content || '(empty)';
+  } catch {
+    el.textContent = '(No system prompt found)';
+  }
+}
+
+async function loadAgentKbList(agentId) {
+  const el = document.getElementById('agentKbList');
+  el.innerHTML = '<div class="cc-loading">Loading KB files...</div>';
+
+  try {
+    const data = await apiCall(`/api/kb/list?agent=${encodeURIComponent(agentId)}`);
+    const files = data.files || [];
+
+    if (files.length === 0) {
+      el.innerHTML = '<div class="cc-text-muted" style="font-size: 12px;">No KB files.</div>';
+      return;
+    }
+
+    el.innerHTML = files.map(f => `
+      <div class="cc-agent-kb-file" data-agent-id="${escapeHtml(agentId)}" data-file="${escapeHtml(f)}">
+        <span class="cc-agent-kb-file-icon">&#128196;</span>
+        <span class="cc-agent-kb-file-name">${escapeHtml(f)}</span>
+      </div>
+    `).join('');
+  } catch {
+    el.innerHTML = '<div class="cc-text-muted" style="font-size: 12px;">Unable to load KB files.</div>';
+  }
+}
+
+async function openKbFile(agentId, filename) {
+  const viewer = document.getElementById('agentKbViewer');
+  const titleEl = document.getElementById('agentKbViewerTitle');
+  const contentEl = document.getElementById('agentKbViewerContent');
+
+  titleEl.textContent = filename;
+  contentEl.textContent = 'Loading...';
+  viewer.style.display = 'block';
+
+  try {
+    const data = await apiCall(`/api/kb/read?file=${encodeURIComponent(filename)}&agent=${encodeURIComponent(agentId)}`);
+    contentEl.textContent = data.content || '(empty)';
+  } catch {
+    contentEl.textContent = '(Unable to read file)';
+  }
 }
 
 // ── Board Tab ───────────────────────────────────────────────
@@ -1074,6 +1173,31 @@ document.getElementById('newProjectForm').addEventListener('submit', async (e) =
 });
 
 // ── Event Listeners ──────────────────────────────────────────────
+
+// Team card click — open agent detail
+dom.teamGrid.addEventListener('click', (e) => {
+  const card = e.target.closest('.cc-team-card-clickable');
+  if (!card) return;
+  const agentId = card.dataset.agentId;
+  if (agentId) showAgentDetail(agentId);
+});
+
+// Agent detail back button
+document.getElementById('agentDetailBack').addEventListener('click', hideAgentDetail);
+
+// KB file list click — open file viewer
+document.getElementById('agentKbList').addEventListener('click', (e) => {
+  const fileEl = e.target.closest('.cc-agent-kb-file');
+  if (!fileEl) return;
+  const agentId = fileEl.dataset.agentId;
+  const filename = fileEl.dataset.file;
+  if (agentId && filename) openKbFile(agentId, filename);
+});
+
+// KB viewer close button
+document.getElementById('agentKbViewerClose').addEventListener('click', () => {
+  document.getElementById('agentKbViewer').style.display = 'none';
+});
 
 // Project selection
 dom.projectList.addEventListener('click', (e) => {
