@@ -5,25 +5,23 @@ import SwiftUI
 @Observable
 class NavigationRouter {
     enum Tab: String, CaseIterable {
-        case team, board, threads, ops, metrics
+        case home, team, board, threads
 
         var label: String {
             switch self {
+            case .home: "Home"
             case .team: "Team"
             case .board: "Board"
             case .threads: "Threads"
-            case .ops: "Ops"
-            case .metrics: "Metrics"
             }
         }
 
         var icon: String {
             switch self {
+            case .home: "house"
             case .team: "person.3"
             case .board: "rectangle.split.3x1"
             case .threads: "bubble.left.and.bubble.right"
-            case .ops: "gearshape.2"
-            case .metrics: "chart.bar"
             }
         }
     }
@@ -37,7 +35,7 @@ class NavigationRouter {
 
     init() {
         let saved = UserDefaults.standard.string(forKey: AppConfig.selectedTabKey)
-        self.selectedTab = Tab(rawValue: saved ?? "") ?? .threads
+        self.selectedTab = Tab(rawValue: saved ?? "") ?? .home
     }
 
     func navigateToThread(id: String) {
