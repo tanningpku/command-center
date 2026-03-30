@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Root view with 5 tabs matching the Command Center web UI.
-/// All tabs fully functional: Team, Board, Threads, Ops, Metrics.
+/// Root view with 4 tabs: Home, Team, Board, Threads.
 struct MainTabView: View {
     @Environment(NavigationRouter.self) var router
     @Environment(ProjectStore.self) var projectStore
@@ -10,6 +9,10 @@ struct MainTabView: View {
         @Bindable var router = router
 
         TabView(selection: $router.selectedTab) {
+            HomeView()
+                .tag(NavigationRouter.Tab.home)
+                .tabItem { Label("Home", systemImage: "house") }
+
             TeamGridView()
                 .tag(NavigationRouter.Tab.team)
                 .tabItem { Label("Team", systemImage: "person.3") }
@@ -21,14 +24,6 @@ struct MainTabView: View {
             ThreadListView()
                 .tag(NavigationRouter.Tab.threads)
                 .tabItem { Label("Threads", systemImage: "bubble.left.and.bubble.right") }
-
-            OpsView()
-                .tag(NavigationRouter.Tab.ops)
-                .tabItem { Label("Ops", systemImage: "gearshape.2") }
-
-            MetricsView()
-                .tag(NavigationRouter.Tab.metrics)
-                .tabItem { Label("Metrics", systemImage: "chart.bar") }
         }
         .onChange(of: router.selectedTab) { _, _ in
             HapticManager.selection()

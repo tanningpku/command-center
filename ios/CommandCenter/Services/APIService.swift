@@ -203,10 +203,10 @@ actor APIService {
         return try JSONDecoder().decode(SendMessageResponse.self, from: data)
     }
 
-    // MARK: - Ops
+    // MARK: - Dashboard
 
-    func fetchOps() async throws -> OpsResponse {
-        try await fetch("api/ops")
+    func fetchDashboard() async throws -> DashboardResponse {
+        try await fetch("api/dashboard")
     }
 
     // MARK: - Status
@@ -218,10 +218,10 @@ actor APIService {
 
 // MARK: - Response types
 
-struct OpsResponse: Codable {
-    let builds: [JSONValue]?
-    let pulls: [JSONValue]?
-    let lastUpdated: String?
+struct DashboardResponse: Codable {
+    let blocks: [DashboardBlock]?
+    let updatedAt: String?
+    let updatedBy: String?
 }
 
 struct StatusResponse: Codable {

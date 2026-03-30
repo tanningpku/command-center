@@ -8,8 +8,7 @@ struct CommandCenterApp: App {
     @State private var threadStore: ThreadStore
     @State private var teamStore: TeamStore
     @State private var boardStore: BoardStore
-    @State private var opsStore: OpsStore
-    @State private var metricsStore: MetricsStore
+    @State private var homeStore: HomeStore
     @State private var router = NavigationRouter()
 
     init() {
@@ -22,8 +21,7 @@ struct CommandCenterApp: App {
         self.threadStore = ThreadStore(api: api, sseService: sse)
         self.teamStore = TeamStore(api: api)
         self.boardStore = BoardStore(api: api)
-        self.opsStore = OpsStore(api: api)
-        self.metricsStore = MetricsStore(api: api)
+        self.homeStore = HomeStore(api: api)
     }
 
     var body: some Scene {
@@ -33,8 +31,7 @@ struct CommandCenterApp: App {
                 .environment(threadStore)
                 .environment(teamStore)
                 .environment(boardStore)
-                .environment(opsStore)
-                .environment(metricsStore)
+                .environment(homeStore)
                 .environment(router)
                 .task {
                     await projectStore.load()
