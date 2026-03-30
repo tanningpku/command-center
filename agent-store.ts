@@ -155,7 +155,7 @@ This replaces manually creating "familiarization" tasks. The agent's identity pr
 
 Example flow:
 1. \`cc agent create --name "Backend Lead" --role "Owns server-side code..."\`
-2. \`cc thread create --name "Backend Lead onboarding" --participants backend-lead\`
+2. \`cc thread create --name "Backend Lead onboarding" --participants captain,backend-lead\`
 3. \`cc msg send --thread <thread-id> --text "You've just been created. Before taking any tasks, explore your ownership area in depth. Read the key source files, understand the architecture, trace the data flows, then write what you learn to your KB (cc kb write). Post a summary here when done."\`
 
 ## Decision Making
