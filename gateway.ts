@@ -821,7 +821,16 @@ export class Gateway {
     if (method === "GET" && pathname === "/api/agents") {
       const url = new URL(req.url ?? "/", `http://localhost`);
       const status = url.searchParams.get("status") ?? undefined;
-      this.sendJson(res, 200, { agents: store.list({ status }) });
+      const agents = store.list({ status }).map((agent) => {
+        const bKey = this.bridgeKey(projectId, agent.id);
+        const bridge = this.claudeBridges.get(bKey);
+        let bridgeStatus: "connected" | "disconnected" | "idle" = "idle";
+        if (bridge) {
+          bridgeStatus = bridge.isReady() ? "connected" : "disconnected";
+        }
+        return { ...agent, bridgeStatus };
+      });
+      this.sendJson(res, 200, { agents });
       return;
     }
 
@@ -852,7 +861,13 @@ export class Gateway {
       if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }
       const agent = store.get(id);
       if (!agent) { this.sendJson(res, 404, { error: `Agent not found: ${id}` }); return; }
-      this.sendJson(res, 200, agent);
+      const bKey = this.bridgeKey(projectId, id);
+      const bridge = this.claudeBridges.get(bKey);
+      let bridgeStatus: "connected" | "disconnected" | "idle" = "idle";
+      if (bridge) {
+        bridgeStatus = bridge.isReady() ? "connected" : "disconnected";
+      }
+      this.sendJson(res, 200, { ...agent, bridgeStatus });
       return;
     }
 
