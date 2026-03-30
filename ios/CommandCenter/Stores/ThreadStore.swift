@@ -12,6 +12,10 @@ class ThreadStore {
     var isConnected = false
     var error: String?
 
+    /// Callbacks for routing SSE events to other stores
+    var onAgentEvent: ((String, [String: Any]) -> Void)?
+    var onTaskEvent: ((String, [String: Any]) -> Void)?
+
     private let api: APIService
     private let sseService: SSEService
     private var sseTask: Task<Void, Never>?
@@ -117,12 +121,10 @@ class ThreadStore {
             }
 
         case "task_created", "task_updated", "task_completed":
-            // Board/metrics stores would handle these in Phase 2
-            break
+            onTaskEvent?(event.type, event.payload)
 
         case "agent_created", "agent_updated", "agent_archived":
-            // Team store would handle these in Phase 2
-            break
+            onAgentEvent?(event.type, event.payload)
 
         case "assistant_text":
             // Could show typing indicator — future enhancement

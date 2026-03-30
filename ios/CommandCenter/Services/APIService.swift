@@ -125,6 +125,18 @@ actor APIService {
         return try await fetch("api/tasks", query: query)
     }
 
+    // MARK: - Knowledge Base
+
+    func fetchKBList(agentId: String) async throws -> KBListResponse {
+        try await fetch("api/kb/list", query: [("agent", agentId)])
+    }
+
+    func fetchKBRead(agentId: String, fileName: String, section: String? = nil) async throws -> KBReadResponse {
+        var query: [(String, String)] = [("agent", agentId), ("file", fileName)]
+        if let section { query.append(("section", section)) }
+        return try await fetch("api/kb/read", query: query)
+    }
+
     // MARK: - Ops
 
     func fetchOps() async throws -> OpsResponse {
@@ -148,4 +160,14 @@ struct OpsResponse: Codable {
 
 struct StatusResponse: Codable {
     let ready: Bool?
+}
+
+struct KBListResponse: Codable {
+    let files: [String]
+}
+
+struct KBReadResponse: Codable {
+    let file: String
+    let content: String
+    let section: String?
 }

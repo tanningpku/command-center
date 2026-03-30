@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Root view with 5 tabs matching the Command Center web UI.
-/// Phase 1: Threads tab is fully functional, others show placeholders.
+/// Phase 1: Threads. Phase 2: Team + Board. Phase 3: Ops + Metrics (placeholder).
 struct MainTabView: View {
     @Environment(NavigationRouter.self) var router
     @Environment(ProjectStore.self) var projectStore
@@ -10,11 +10,11 @@ struct MainTabView: View {
         @Bindable var router = router
 
         TabView(selection: $router.selectedTab) {
-            PlaceholderTab(title: "Team", icon: "person.3", message: "Coming in Phase 2")
+            TeamGridView()
                 .tag(NavigationRouter.Tab.team)
                 .tabItem { Label("Team", systemImage: "person.3") }
 
-            PlaceholderTab(title: "Board", icon: "rectangle.split.3x1", message: "Coming in Phase 2")
+            BoardView()
                 .tag(NavigationRouter.Tab.board)
                 .tabItem { Label("Board", systemImage: "rectangle.split.3x1") }
 
