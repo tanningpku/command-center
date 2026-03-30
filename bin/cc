@@ -226,6 +226,25 @@ case "${1:-help}" in
     esac
     ;;
 
+  # ── Harness exec ──────────────────────────────────────────────
+  exec)
+    shift
+    CMD="" CWD="" TIMEOUT=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --cwd) CWD="$2"; shift 2;;
+        --timeout) TIMEOUT="$2"; shift 2;;
+        *) CMD="$1"; shift;;
+      esac
+    done
+    [ -z "$CMD" ] && echo "Error: command argument is required" && exit 2
+    BODY="{\"command\":\"$CMD\""
+    [ -n "$CWD" ] && BODY="$BODY,\"cwd\":\"$CWD\""
+    [ -n "$TIMEOUT" ] && BODY="$BODY,\"timeout\":$TIMEOUT"
+    BODY="$BODY}"
+    json_post "/api/harness/exec" "$BODY"
+    ;;
+
   # ── Board / Ops / Metrics ─────────────────────────────────────
   board)
     json_get "/api/board" | python3 -c "
@@ -322,6 +341,9 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     echo "  thread create --name <n> [--participants <p1,p2>]"
     echo "  msg send      --thread <id> --text <t>"
     echo "  msg history   --thread <id> [--limit <n>]"
+    echo ""
+    echo "Harness:"
+    echo "  exec <cmd>    Execute a bash command via the harness [--cwd <dir>] [--timeout <s>]"
     echo ""
     echo "Views:"
     echo "  board         Show project board"
