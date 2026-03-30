@@ -481,9 +481,31 @@ export class Gateway {
     return null;
   }
 
-  /** Check if request is authenticated. Returns true if auth is disabled or token is valid. */
+  /** Check if a request originates from a local/private network address. */
+  private isLocalRequest(req: http.IncomingMessage): boolean {
+    // If behind a reverse proxy (Cloudflare tunnel), check X-Forwarded-For
+    const forwarded = req.headers["x-forwarded-for"];
+    if (forwarded) {
+      // If X-Forwarded-For is present, the original client is NOT local
+      // (local clients connect directly without the proxy)
+      return false;
+    }
+    const ip = req.socket.remoteAddress ?? "";
+    return (
+      ip === "127.0.0.1" ||
+      ip === "::1" ||
+      ip === "::ffff:127.0.0.1" ||
+      ip.startsWith("192.168.") ||
+      ip.startsWith("::ffff:192.168.") ||
+      ip.startsWith("10.") ||
+      ip.startsWith("::ffff:10.")
+    );
+  }
+
+  /** Check if request is authenticated. Returns true if auth is disabled, local, or token is valid. */
   private isAuthenticated(req: http.IncomingMessage): boolean {
     if (!this.authEnabled) return true;
+    if (this.isLocalRequest(req)) return true;
     const token = this.extractToken(req);
     return !!token && this.authTokens.has(token);
   }
@@ -513,8 +535,9 @@ export class Gateway {
       this.sendJson(res, 200, { authenticated: true, authEnabled: false });
       return;
     }
-    const authenticated = this.isAuthenticated(req);
-    this.sendJson(res, authenticated ? 200 : 401, { authenticated, authEnabled: true });
+    const local = this.isLocalRequest(req);
+    const authenticated = local || this.isAuthenticated(req);
+    this.sendJson(res, authenticated ? 200 : 401, { authenticated, authEnabled: true, local });
   }
 
   /** Handle POST /api/logout */
