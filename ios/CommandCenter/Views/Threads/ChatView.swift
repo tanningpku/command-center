@@ -37,9 +37,12 @@ struct ChatView: View {
                                 MessageBubbleView(message: message)
                                     .id(message.id)
                             }
+                            // Anchor at bottom — always present, ensures scrollTo target exists
+                            Color.clear.frame(height: 1).id("bottom-anchor")
                         }
                         .padding(.vertical, 8)
                     }
+                    .defaultScrollAnchor(.bottom)
                     .onAppear { scrollProxy = proxy }
                     .onChange(of: threadStore.messages.count) {
                         scrollToBottom(proxy: proxy)
@@ -123,7 +126,8 @@ struct ChatView: View {
         }
         .task {
             await threadStore.loadMessages(threadId: threadId)
-            // Scroll to bottom after initial load
+            // Yield to let LazyVStack lay out, then scroll
+            try? await Task.sleep(for: .milliseconds(100))
             if let proxy = scrollProxy {
                 scrollToBottom(proxy: proxy)
             }
@@ -339,11 +343,13 @@ struct ChatView: View {
         }
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        if let last = threadStore.messages.last {
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
+        if animated {
             withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(last.id, anchor: .bottom)
+                proxy.scrollTo("bottom-anchor", anchor: .bottom)
             }
+        } else {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
         }
     }
 }
