@@ -10,6 +10,7 @@ struct ThreadListView: View {
     @State private var navigationPath = NavigationPath()
     @State private var showSettings = false
     @State private var showCompleted = false
+    @State private var showNewThread = false
 
     /// Thread IDs linked to done/cancelled tasks
     private var completedThreadIds: Set<String> {
@@ -102,6 +103,10 @@ struct ThreadListView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
                         ConnectionDot(isConnected: threadStore.isConnected)
+                        Button { showNewThread = true } label: {
+                            Image(systemName: "plus")
+                                .font(.body)
+                        }
                         Button { showSettings = true } label: {
                             Image(systemName: "gearshape")
                                 .font(.body)
@@ -135,6 +140,11 @@ struct ThreadListView: View {
                 }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showNewThread) {
+                NewThreadView { thread in
+                    navigationPath.append(thread)
+                }
+            }
         }
     }
 
