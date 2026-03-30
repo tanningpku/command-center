@@ -72,8 +72,10 @@ while true; do
 
   $CMD &
   CHILD_PID=$!
-  wait "$CHILD_PID" 2>/dev/null || true
+  set +e
+  wait "$CHILD_PID" 2>/dev/null
   EXIT_CODE=$?
+  set -e
   CHILD_PID=""
 
   # Don't restart on intentional shutdown
