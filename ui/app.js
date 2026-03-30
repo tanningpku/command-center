@@ -579,6 +579,7 @@ async function loadBoardData() {
 }
 
 function renderBoardFromTasks(tasks) {
+  state._lastBoardTasks = tasks;
   const columns = {};
   BOARD_COLUMNS.forEach(col => columns[col] = []);
 
@@ -591,20 +592,33 @@ function renderBoardFromTasks(tasks) {
     }
   });
 
+  const DONE_INITIAL_LIMIT = 10;
+
   dom.boardColumns.innerHTML = BOARD_COLUMNS.map(colName => {
     const cards = columns[colName];
+    const isDone = colName === 'Done';
+    const visibleCards = isDone && cards.length > DONE_INITIAL_LIMIT
+      ? cards.slice(0, DONE_INITIAL_LIMIT)
+      : cards;
+    const hiddenCount = isDone ? cards.length - visibleCards.length : 0;
+
     const cardHtml = cards.length === 0
       ? `<div class="cc-board-empty">No tasks</div>`
-      : cards.map(task => renderTaskCard(task)).join('');
+      : visibleCards.map(task => renderTaskCard(task)).join('');
+
+    const showMoreHtml = hiddenCount > 0
+      ? `<button class="cc-board-show-more" data-column="Done">Show ${hiddenCount} more</button>`
+      : '';
 
     return `
-      <div class="cc-board-column">
+      <div class="cc-board-column" data-col="${escapeHtml(colName)}">
         <div class="cc-board-column-header">
           <span class="cc-board-column-title">${escapeHtml(colName)}</span>
           <span class="cc-board-column-count">${cards.length}</span>
         </div>
         <div class="cc-board-card-list">
           ${cardHtml}
+          ${showMoreHtml}
         </div>
       </div>
     `;
@@ -1713,8 +1727,28 @@ document.getElementById('participantPicker').addEventListener('click', (e) => {
   if (chip) chip.classList.toggle('selected');
 });
 
-// Board card click — navigate to task thread
+// Board card click — navigate to task thread, or expand "Show more"
 document.getElementById('boardColumns').addEventListener('click', (e) => {
+  // Handle "Show more" button in Done column
+  const showMoreBtn = e.target.closest('.cc-board-show-more');
+  if (showMoreBtn) {
+    const col = showMoreBtn.closest('.cc-board-column');
+    const cardList = col && col.querySelector('.cc-board-card-list');
+    if (cardList && state._lastBoardTasks) {
+      const doneTasks = state._lastBoardTasks.filter(
+        t => (TASK_STATE_TO_COLUMN[t.state] || 'Backlog') === 'Done'
+      );
+      const remaining = doneTasks.slice(cardList.querySelectorAll('.cc-board-card').length);
+      remaining.forEach(task => {
+        const div = document.createElement('div');
+        div.innerHTML = renderTaskCard(task);
+        cardList.insertBefore(div.firstElementChild, showMoreBtn);
+      });
+      showMoreBtn.remove();
+    }
+    return;
+  }
+
   const card = e.target.closest('.cc-board-card[data-thread-id]');
   if (!card) return;
   const threadId = card.dataset.threadId;
