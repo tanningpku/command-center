@@ -1965,6 +1965,17 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Ctrl/Cmd + number shortcuts — work even when input is focused
+  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '4') {
+    e.preventDefault();
+    const tabs = ['home', 'team', 'board', 'threads'];
+    const idx = parseInt(key, 10) - 1;
+    if (tabs[idx] && state.selectedProjectId) {
+      showTab(tabs[idx]);
+    }
+    return;
+  }
+
   // All other shortcuts: skip when typing in an input
   if (isInputFocused()) return;
 
@@ -1978,17 +1989,6 @@ document.addEventListener('keydown', (e) => {
   if (key === '?') {
     e.preventDefault();
     showShortcutHelp();
-    return;
-  }
-
-  // Ctrl/Cmd + number shortcuts (keep existing)
-  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '4') {
-    e.preventDefault();
-    const tabs = ['home', 'team', 'board', 'threads'];
-    const idx = parseInt(key, 10) - 1;
-    if (tabs[idx] && state.selectedProjectId) {
-      showTab(tabs[idx]);
-    }
     return;
   }
 
