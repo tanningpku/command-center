@@ -443,6 +443,36 @@ case "${1:-help}" in
     exit $BUILD_EXIT
     ;;
 
+  # ── iOS Build Daemon ──────────────────────────────────────────
+  ios-daemon)
+    shift
+    SSH_HOST="${IOS_BUILD_HOST:-ntan@192.168.86.28}"
+    ACTION="${1:-status}"
+
+    case "$ACTION" in
+      deploy)
+        echo "[cc] Deploying ios-build-daemon.sh to $SSH_HOST..."
+        scp -o ConnectTimeout=10 "$DIR/bin/ios-build-daemon.sh" "$SSH_HOST:~/ios-build-daemon.sh"
+        ssh -o ConnectTimeout=10 "$SSH_HOST" "bash -c 'chmod +x ~/ios-build-daemon.sh'"
+        echo "[cc] Deployed. Use 'cc ios-daemon start' to start."
+        ;;
+      start)
+        echo "[cc] Starting daemon on $SSH_HOST..."
+        ssh -o ConnectTimeout=10 "$SSH_HOST" "bash -c '~/ios-build-daemon.sh start'"
+        ;;
+      stop)
+        ssh -o ConnectTimeout=10 "$SSH_HOST" "bash -c '~/ios-build-daemon.sh stop'"
+        ;;
+      status)
+        ssh -o ConnectTimeout=10 "$SSH_HOST" "bash -c '~/ios-build-daemon.sh status'"
+        ;;
+      log)
+        ssh -o ConnectTimeout=10 "$SSH_HOST" "bash -c 'tail -${2:-30} ~/.ios-build-daemon.log 2>/dev/null || echo No log yet'"
+        ;;
+      *) echo "Usage: cc ios-daemon {deploy|start|stop|status|log [N]}"; exit 2;;
+    esac
+    ;;
+
   # ── Board / Ops / Metrics ─────────────────────────────────────
   board)
     json_get "/api/board" | python3 -c "
