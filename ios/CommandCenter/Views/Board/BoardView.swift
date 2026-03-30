@@ -5,7 +5,7 @@ struct BoardView: View {
     @Environment(BoardStore.self) var boardStore
     @Environment(ProjectStore.self) var projectStore
     @State private var selectedTask: CCTask?
-    @State private var expandedSections: Set<TaskState> = Set(TaskState.allCases)
+    @State private var collapsedSections: Set<TaskState> = []
 
     /// Only show sections that have tasks
     private var activeSections: [TaskState] {
@@ -23,19 +23,33 @@ struct BoardView: View {
                         description: Text("Tasks will appear here when created."))
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                             ForEach(activeSections, id: \.self) { state in
-                                BoardSection(
-                                    state: state,
-                                    tasks: boardStore.tasksForState(state),
-                                    isExpanded: expandedSections.contains(state),
-                                    onToggle: { toggleSection(state) },
-                                    onSelect: { selectedTask = $0 }
-                                )
+                                let tasks = boardStore.tasksForState(state)
+                                let isExpanded = !collapsedSections.contains(state)
+
+                                Section {
+                                    if isExpanded {
+                                        ForEach(tasks) { task in
+                                            Button { selectedTask = task } label: {
+                                                BoardTaskCard(task: task)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.horizontal, 16)
+                                            .padding(.top, 8)
+                                        }
+                                        .padding(.bottom, 4)
+                                    }
+                                } header: {
+                                    BoardSectionHeader(
+                                        state: state,
+                                        count: tasks.count,
+                                        isExpanded: isExpanded,
+                                        onToggle: { toggleSection(state) }
+                                    )
+                                }
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
                     }
                 }
             }
@@ -63,72 +77,114 @@ struct BoardView: View {
 
     private func toggleSection(_ state: TaskState) {
         withAnimation(.easeInOut(duration: 0.25)) {
-            if expandedSections.contains(state) {
-                expandedSections.remove(state)
+            if collapsedSections.contains(state) {
+                collapsedSections.remove(state)
             } else {
-                expandedSections.insert(state)
+                collapsedSections.insert(state)
             }
         }
     }
 }
 
-/// An expandable section for a task state with a header and task cards.
-struct BoardSection: View {
+/// Sticky section header for a board state group.
+struct BoardSectionHeader: View {
     let state: TaskState
-    let tasks: [CCTask]
+    let count: Int
     let isExpanded: Bool
     let onToggle: () -> Void
-    let onSelect: (CCTask) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Section header
-            Button(action: onToggle) {
-                HStack(spacing: 10) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
+        Button(action: onToggle) {
+            HStack(spacing: 10) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(state.color)
+                    .frame(width: 16)
 
-                    Circle()
-                        .fill(state.color)
-                        .frame(width: 10, height: 10)
+                Circle()
+                    .fill(state.color)
+                    .frame(width: 10, height: 10)
 
-                    Text(state.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                Text(state.displayName.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .tracking(0.5)
 
-                    Text("\(tasks.count)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Color(.systemGray5))
-                        .clipShape(Capsule())
+                Text("\(count)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(state.color)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(state.color.opacity(0.15))
+                    .clipShape(Capsule())
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Improved task card with colored accent and better hierarchy.
+struct BoardTaskCard: View {
+    let task: CCTask
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Colored accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(task.state.color)
+                .frame(width: 4)
+                .padding(.vertical, 6)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top) {
+                    Text(task.id)
+                        .font(.caption2.monospaced().weight(.medium))
+                        .foregroundStyle(task.state.color)
 
                     Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-            .buttonStyle(.plain)
 
-            // Task cards
-            if isExpanded {
-                VStack(spacing: 8) {
-                    ForEach(tasks) { task in
-                        Button { onSelect(task) } label: {
-                            TaskCardView(task: task)
+                    Text(task.priority.rawValue.capitalized)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(task.priority.color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(task.priority.color.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
+                Text(task.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 12) {
+                    if let assignee = task.assignee {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.fill")
+                                .font(.caption2)
+                            Text(assignee)
+                                .font(.caption)
                         }
-                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if let update = task.latestUpdate, !update.isEmpty {
+                        Text(update)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
-        .background(Color(.systemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
