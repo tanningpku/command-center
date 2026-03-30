@@ -137,8 +137,8 @@ export class ClaudeBridge extends EventEmitter {
   /** Timestamp of most recent user message sent to bridge */
   private lastUserMessageAt = 0;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
-  /** Timeout in ms with no activity after sending a message before considering stuck (default: 3min) */
-  static readonly STUCK_TIMEOUT_MS = 180_000;
+  /** Timeout in ms with no activity after sending a message before considering stuck (default: 5min) */
+  static readonly STUCK_TIMEOUT_MS = 300_000;
   /** How often the watchdog checks for stuck bridges (default: 30s) */
   private static readonly WATCHDOG_INTERVAL_MS = 30_000;
 
@@ -419,6 +419,8 @@ export class ClaudeBridge extends EventEmitter {
     if (this.stopped || this.autoRestartPending) return;
     // Only check if we've actually sent a message (agent is expected to be working)
     if (this.lastUserMessageAt === 0) return;
+    // Only relevant if child process is alive (exit handler covers crashes)
+    if (!this.child) return;
 
     const now = Date.now();
     const sinceActivity = now - this.lastActivityAt;
