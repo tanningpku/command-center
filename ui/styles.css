@@ -1020,6 +1020,63 @@ body {
   cursor: not-allowed;
 }
 
+/* ── Participant Picker ───────────────────────────────────────── */
+
+.cc-participant-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cc-participant-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--cc-bg);
+  border: 1px solid var(--cc-border);
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--cc-text-secondary);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.cc-participant-chip:hover {
+  border-color: var(--cc-text-muted);
+}
+
+.cc-participant-chip.selected {
+  background: var(--cc-accent);
+  border-color: var(--cc-accent);
+  color: #fff;
+}
+
+.cc-participant-chip .cc-chip-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cc-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--cc-text);
+}
+
+.cc-participant-chip.selected .cc-chip-avatar {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.cc-participant-picker-empty {
+  font-size: 12px;
+  color: var(--cc-text-faint);
+  padding: 8px 0;
+}
+
 /* ── Threads Split Layout ──────────────────────────────────────── */
 
 .cc-threads-split {

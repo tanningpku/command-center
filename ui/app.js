@@ -1223,28 +1223,86 @@ async function sendChatMessage() {
   }
 }
 
-async function createNewThread() {
-  const title = prompt('Thread title:');
-  if (!title) return;
+// ── New Thread Modal ──────────────────────────────────────────
+
+async function openNewThreadModal() {
+  const modal = document.getElementById('newThreadModal');
+  const errorEl = document.getElementById('newThreadError');
+  const titleInput = document.getElementById('threadTitle');
+  const submitBtn = document.getElementById('newThreadSubmitBtn');
+
+  errorEl.style.display = 'none';
+  titleInput.value = '';
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Create Thread';
+
+  // Load agents for participant picker
+  const picker = document.getElementById('participantPicker');
+  picker.innerHTML = '<span class="cc-participant-picker-empty">Loading agents...</span>';
 
   try {
-    const result = await apiPost('/api/threads', {
-      title: title,
-      assistantId: 'captain',
-      participants: [
-        { participantType: 'assistant', participantId: 'captain' },
-        { participantType: 'user', participantId: 'ning' },
-      ],
-    });
+    const data = await apiCall('/api/agents');
+    const agents = data.agents || [];
+    if (agents.length === 0) {
+      picker.innerHTML = '<span class="cc-participant-picker-empty">No agents available</span>';
+    } else {
+      picker.innerHTML = agents.map(agent => {
+        const initial = (agent.name || agent.id || '?').charAt(0).toUpperCase();
+        // Captain is selected by default
+        const selected = agent.id === 'captain' ? 'selected' : '';
+        return `
+          <div class="cc-participant-chip ${selected}" data-agent-id="${escapeHtml(agent.id)}" data-agent-name="${escapeHtml(agent.name || agent.id)}">
+            <span class="cc-chip-avatar">${escapeHtml(initial)}</span>
+            <span>${escapeHtml(agent.name || agent.id)}</span>
+          </div>
+        `;
+      }).join('');
+    }
+  } catch (err) {
+    picker.innerHTML = '<span class="cc-participant-picker-empty">Failed to load agents</span>';
+  }
+
+  modal.style.display = 'flex';
+  titleInput.focus();
+}
+
+function closeNewThreadModal() {
+  document.getElementById('newThreadModal').style.display = 'none';
+}
+
+async function submitNewThread(e) {
+  e.preventDefault();
+  const titleInput = document.getElementById('threadTitle');
+  const errorEl = document.getElementById('newThreadError');
+  const submitBtn = document.getElementById('newThreadSubmitBtn');
+
+  const title = titleInput.value.trim();
+  if (!title) return;
+
+  const selectedChips = document.querySelectorAll('#participantPicker .cc-participant-chip.selected');
+  const participants = Array.from(selectedChips).map(chip => ({
+    participantType: 'assistant',
+    participantId: chip.dataset.agentId,
+  }));
+
+  errorEl.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Creating...';
+
+  try {
+    const result = await apiPost('/api/threads', { title, participants });
     const newThread = result.thread || result;
-    // Reload thread list and select the new thread
+    closeNewThreadModal();
     await loadThreadsData();
     if (newThread && newThread.id) {
       selectThread(newThread.id);
     }
   } catch (err) {
     console.error('Failed to create thread:', err);
-    alert(`Failed to create thread: ${err.message}`);
+    errorEl.textContent = err.message;
+    errorEl.style.display = 'block';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Create Thread';
   }
 }
 
@@ -1526,7 +1584,18 @@ chatInput.addEventListener('input', () => {
 
 // New thread button
 document.getElementById('newThreadBtn').addEventListener('click', () => {
-  createNewThread();
+  openNewThreadModal();
+});
+
+// New Thread modal
+document.getElementById('newThreadCloseBtn').addEventListener('click', closeNewThreadModal);
+document.getElementById('newThreadModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeNewThreadModal();
+});
+document.getElementById('newThreadForm').addEventListener('submit', submitNewThread);
+document.getElementById('participantPicker').addEventListener('click', (e) => {
+  const chip = e.target.closest('.cc-participant-chip');
+  if (chip) chip.classList.toggle('selected');
 });
 
 // Board card click — navigate to task thread
