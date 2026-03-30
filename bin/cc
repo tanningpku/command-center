@@ -406,6 +406,43 @@ case "${1:-help}" in
     json_post "/api/harness/exec" "$BODY"
     ;;
 
+  # ── iOS Build ─────────────────────────────────────────────────
+  ios-build)
+    shift
+    BUILD_ARGS=""
+    THREAD=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --host)     BUILD_ARGS="$BUILD_ARGS --host $2"; shift 2;;
+        --repo-dir) BUILD_ARGS="$BUILD_ARGS --repo-dir $2"; shift 2;;
+        --no-pull)  BUILD_ARGS="$BUILD_ARGS --no-pull"; shift;;
+        --verbose)  BUILD_ARGS="$BUILD_ARGS --verbose"; shift;;
+        --thread)   THREAD="$2"; shift 2;;
+        *) echo "Unknown flag: $1"; exit 2;;
+      esac
+    done
+
+    echo "[cc] Starting iOS build via SSH..."
+    BUILD_OUTPUT=$("$DIR/bin/ios-build.sh" $BUILD_ARGS 2>&1) && BUILD_EXIT=0 || BUILD_EXIT=$?
+
+    echo "$BUILD_OUTPUT"
+
+    # Post results to thread if requested
+    if [ -n "$THREAD" ]; then
+      if [ $BUILD_EXIT -eq 0 ]; then
+        SUMMARY="iOS build SUCCEEDED"
+      else
+        ERRORS=$(echo "$BUILD_OUTPUT" | grep -E "error:" | head -5 | tr '\n' '; ' || true)
+        SUMMARY="iOS build FAILED"
+        [ -n "$ERRORS" ] && SUMMARY="$SUMMARY — $ERRORS"
+      fi
+      json_post "/api/message" "{\"thread_id\":\"$THREAD\",\"text\":\"$SUMMARY\",\"sender\":\"$AGENT\",\"source\":\"cli\"}" > /dev/null
+      echo "[cc] Build result posted to thread."
+    fi
+
+    exit $BUILD_EXIT
+    ;;
+
   # ── Board / Ops / Metrics ─────────────────────────────────────
   board)
     json_get "/api/board" | python3 -c "
@@ -604,6 +641,14 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     echo "  ops           Show CI builds and open PRs"
     echo "  metrics       Show task metrics"
     echo "  status        Show overall status"
+    echo ""
+    echo "iOS Build:"
+    echo "  ios-build     Build iOS app via SSH to Mac"
+    echo "                [--host <user@host>] SSH target (default: ntan@192.168.86.28)"
+    echo "                [--repo-dir <path>] Repo path on Mac (default: ~/code/command-center)"
+    echo "                [--no-pull] Skip git pull"
+    echo "                [--verbose] Show full xcodebuild output"
+    echo "                [--thread <id>] Post result to a thread"
     echo ""
     echo "Gateway:"
     echo "  start         Start the Command Center gateway"
