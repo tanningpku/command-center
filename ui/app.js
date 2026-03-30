@@ -18,6 +18,7 @@ const state = {
   unreadThreads: {},         // threadId → true if has unread messages
   chatHasMore: false,        // true if more messages available before current page
   chatOldestTimestamp: null,  // createdAt of earliest loaded message
+  donePage: 0,               // current page index for Done column pagination
 };
 
 // ── DOM References ───────────────────────────────────────────────
@@ -592,22 +593,27 @@ function renderBoardFromTasks(tasks) {
     }
   });
 
-  const DONE_INITIAL_LIMIT = 10;
+  const DONE_PAGE_SIZE = 10;
 
   dom.boardColumns.innerHTML = BOARD_COLUMNS.map(colName => {
     const cards = columns[colName];
     const isDone = colName === 'Done';
-    const visibleCards = isDone && cards.length > DONE_INITIAL_LIMIT
-      ? cards.slice(0, DONE_INITIAL_LIMIT)
+    const totalPages = isDone ? Math.max(1, Math.ceil(cards.length / DONE_PAGE_SIZE)) : 1;
+    if (isDone) state.donePage = Math.min(state.donePage, totalPages - 1);
+    const visibleCards = isDone && cards.length > DONE_PAGE_SIZE
+      ? cards.slice(state.donePage * DONE_PAGE_SIZE, (state.donePage + 1) * DONE_PAGE_SIZE)
       : cards;
-    const hiddenCount = isDone ? cards.length - visibleCards.length : 0;
 
     const cardHtml = cards.length === 0
       ? `<div class="cc-board-empty">No tasks</div>`
       : visibleCards.map(task => renderTaskCard(task)).join('');
 
-    const showMoreHtml = hiddenCount > 0
-      ? `<button class="cc-board-show-more" data-column="Done">Show ${hiddenCount} more</button>`
+    const paginationHtml = isDone && totalPages > 1
+      ? `<div class="cc-board-pagination">
+          <button class="cc-board-page-btn" data-dir="prev" ${state.donePage === 0 ? 'disabled' : ''}>&lt;</button>
+          <span class="cc-board-page-info">${state.donePage + 1} / ${totalPages}</span>
+          <button class="cc-board-page-btn" data-dir="next" ${state.donePage >= totalPages - 1 ? 'disabled' : ''}>&gt;</button>
+        </div>`
       : '';
 
     return `
@@ -618,7 +624,7 @@ function renderBoardFromTasks(tasks) {
         </div>
         <div class="cc-board-card-list">
           ${cardHtml}
-          ${showMoreHtml}
+          ${paginationHtml}
         </div>
       </div>
     `;
@@ -1756,25 +1762,15 @@ document.getElementById('participantPicker').addEventListener('click', (e) => {
   if (chip) chip.classList.toggle('selected');
 });
 
-// Board card click — navigate to task thread, or expand "Show more"
+// Board card click — navigate to task thread, or paginate Done column
 document.getElementById('boardColumns').addEventListener('click', (e) => {
-  // Handle "Show more" button in Done column
-  const showMoreBtn = e.target.closest('.cc-board-show-more');
-  if (showMoreBtn) {
-    const col = showMoreBtn.closest('.cc-board-column');
-    const cardList = col && col.querySelector('.cc-board-card-list');
-    if (cardList && state._lastBoardTasks) {
-      const doneTasks = state._lastBoardTasks.filter(
-        t => (TASK_STATE_TO_COLUMN[t.state] || 'Backlog') === 'Done'
-      );
-      const remaining = doneTasks.slice(cardList.querySelectorAll('.cc-board-card').length);
-      remaining.forEach(task => {
-        const div = document.createElement('div');
-        div.innerHTML = renderTaskCard(task);
-        cardList.insertBefore(div.firstElementChild, showMoreBtn);
-      });
-      showMoreBtn.remove();
-    }
+  // Handle prev/next pagination in Done column
+  const pageBtn = e.target.closest('.cc-board-page-btn');
+  if (pageBtn && !pageBtn.disabled) {
+    const dir = pageBtn.dataset.dir;
+    if (dir === 'prev') state.donePage = Math.max(0, state.donePage - 1);
+    else if (dir === 'next') state.donePage++;
+    if (state._lastBoardTasks) renderBoard(state._lastBoardTasks);
     return;
   }
 
