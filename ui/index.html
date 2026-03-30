@@ -29,20 +29,17 @@
     <nav class="cc-sidebar">
       <!-- Tab navigation (shown when a project is selected) -->
       <div id="tabNav" class="cc-tab-nav" style="display: none">
-        <button class="cc-nav-tab active" data-tab="team">
+        <button class="cc-nav-tab active" data-tab="home">
+          <span class="cc-nav-icon">H</span> Home
+        </button>
+        <button class="cc-nav-tab" data-tab="team">
           <span class="cc-nav-icon">T</span> Team
         </button>
         <button class="cc-nav-tab" data-tab="board">
           <span class="cc-nav-icon">B</span> Board
         </button>
-        <button class="cc-nav-tab" data-tab="ops">
-          <span class="cc-nav-icon">O</span> Ops
-        </button>
         <button class="cc-nav-tab" data-tab="threads">
           <span class="cc-nav-icon">#</span> Threads
-        </button>
-        <button class="cc-nav-tab" data-tab="metrics">
-          <span class="cc-nav-icon">M</span> Metrics
         </button>
       </div>
 
@@ -58,6 +55,11 @@
         <div class="cc-empty-icon">--</div>
         <h2>Engineering Command Center</h2>
         <p>Select a project from the header to get started.</p>
+      </div>
+
+      <!-- Home tab (dashboard) -->
+      <div id="tab-home" class="cc-tab-content" style="display: none">
+        <div id="dashboardContainer" class="cc-dashboard"></div>
       </div>
 
       <!-- Team tab -->
@@ -108,17 +110,6 @@
         </div>
       </div>
 
-      <!-- Ops tab -->
-      <div id="tab-ops" class="cc-tab-content" style="display: none">
-        <div class="cc-tab-header">
-          <h2>Ops &amp; Reliability</h2>
-          <span id="opsLastUpdated" class="cc-badge"></span>
-        </div>
-        <div id="opsGrid" class="cc-ops-grid">
-          <!-- CI runs, deploy status rendered by JS -->
-        </div>
-      </div>
-
       <!-- Threads tab -->
       <div id="tab-threads" class="cc-tab-content" style="display: none">
         <div class="cc-threads-split">
@@ -150,14 +141,6 @@
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- Metrics tab -->
-      <div id="tab-metrics" class="cc-tab-content" style="display: none">
-        <div class="cc-tab-header">
-          <h2>Metrics</h2>
-        </div>
-        <div id="metricsGrid" class="cc-metrics-grid"></div>
       </div>
     </main>
 
