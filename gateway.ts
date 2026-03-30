@@ -141,6 +141,8 @@ export class Gateway {
       const kb = new KbManager(kbDir);
       kb.ensureDir();
       this.kbManagers.set(this.bridgeKey(id, "captain"), kb);
+      // Backfill existing agents into the team broadcast thread
+      this.backfillTeamParticipants(id);
       console.log(`[gateway] Stores initialized for ${id}`);
     }
 
@@ -187,6 +189,16 @@ export class Gateway {
     }
     this.claudeBridges.clear();
     this.server.close();
+  }
+
+  /** Ensure all existing agents are participants on the team broadcast thread. */
+  private backfillTeamParticipants(projectId: string): void {
+    const agentStore = this.agentStores.get(projectId);
+    const threadStore = this.threadStores.get(projectId);
+    if (!agentStore || !threadStore) return;
+    for (const agent of agentStore.list()) {
+      threadStore.addParticipant("team", { participantType: "assistant", participantId: agent.id });
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -829,6 +841,7 @@ export class Gateway {
     this.kbManagers.set(this.bridgeKey(id, "captain"), kb);
     const agentStore = this.agentStores.get(id)!;
     agentStore.create({ name: captainName, role: "Project lead — coordinates work, manages the team, triages issues", createdBy: "system", isCaptain: true });
+    this.backfillTeamParticipants(id);
 
     this.projects.set(id, config);
     console.log(`[gateway] Created project '${id}' (port ${port}, captain: ${captainName})`);
