@@ -114,9 +114,14 @@ export class TaskStore {
     return rows.map((r: any) => this.rowToTask(r));
   }
 
-  update(id: string, opts: Partial<{ state: TaskState; assignee: string; githubPR: number; latestUpdate: string; priority: string; labels: string[] }>, actor: string): Task {
+  private static readonly VALID_STATES = new Set<TaskState>(["created", "assigned", "in_progress", "in_review", "qa", "blocked", "done", "cancelled"]);
+
+  update(id: string, opts: Partial<{ state: TaskState; assignee: string; githubPR: number; latestUpdate: string; priority: string; labels: string[]; threadId: string }>, actor: string): Task {
     const task = this.get(id);
     if (!task) throw new Error(`Task not found: ${id}`);
+    if (opts.state && !TaskStore.VALID_STATES.has(opts.state)) {
+      throw new Error(`Invalid task state: ${opts.state}. Valid states: ${[...TaskStore.VALID_STATES].join(", ")}`);
+    }
     const sets: string[] = ["updated_at = ?"];
     const params: any[] = [new Date().toISOString()];
     if (opts.state) { sets.push("state = ?"); params.push(opts.state); this.recordEvent(id, task.state, opts.state, actor); }
@@ -125,6 +130,7 @@ export class TaskStore {
     if (opts.latestUpdate !== undefined) { sets.push("latest_update = ?"); params.push(opts.latestUpdate); }
     if (opts.priority) { sets.push("priority = ?"); params.push(opts.priority); }
     if (opts.labels) { sets.push("labels = ?"); params.push(JSON.stringify(opts.labels)); }
+    if (opts.threadId !== undefined) { sets.push("thread_id = ?"); params.push(opts.threadId); }
     params.push(id);
     this.db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params);
     return this.get(id)!;

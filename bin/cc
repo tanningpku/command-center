@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Command Center CLI — tools for Captain and project management
+# Command Center CLI — tools for Captain, agents, and project management
 set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CC_PORT="${CC_PORT:-3300}"
 BASE_URL="http://localhost:${CC_PORT}"
 PROJECT="${CC_PROJECT:-companion}"
+AGENT="${CC_AGENT:-captain}"
 
 json_post() {
-  curl -s -X POST "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -d "$2"
+  curl -s -X POST "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -H "X-Agent-Id: $AGENT" -d "$2"
 }
 json_get() {
-  curl -s "$BASE_URL$1" -H "X-Project-Id: $PROJECT"
+  curl -s "$BASE_URL$1" -H "X-Project-Id: $PROJECT" -H "X-Agent-Id: $AGENT"
 }
 json_patch() {
-  curl -s -X PATCH "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -d "$2"
+  curl -s -X PATCH "$BASE_URL$1" -H 'Content-Type: application/json' -H "X-Project-Id: $PROJECT" -H "X-Agent-Id: $AGENT" -d "$2"
 }
 json_delete() {
-  curl -s -X DELETE "$BASE_URL$1" -H "X-Project-Id: $PROJECT"
+  curl -s -X DELETE "$BASE_URL$1" -H "X-Project-Id: $PROJECT" -H "X-Agent-Id: $AGENT"
 }
 
 case "${1:-help}" in
@@ -73,7 +74,7 @@ case "${1:-help}" in
           esac
         done
         [ -z "$ID" ] && echo "Error: --id is required" && exit 2
-        BODY="{\"actor\":\"captain\""
+        BODY="{\"actor\":\"$AGENT\""
         [ -n "$STATE" ] && BODY="$BODY,\"state\":\"$STATE\""
         [ -n "$NOTE" ] && BODY="$BODY,\"latestUpdate\":\"$NOTE\""
         [ -n "$ASSIGNEE" ] && BODY="$BODY,\"assignee\":\"$ASSIGNEE\""
@@ -92,15 +93,29 @@ case "${1:-help}" in
           esac
         done
         [ -z "$ID" ] && echo "Error: --id is required" && exit 2
-        BODY="{\"actor\":\"captain\""
+        BODY="{\"actor\":\"$AGENT\""
         [ -n "$NOTE" ] && BODY="$BODY,\"notes\":\"$NOTE\""
         BODY="$BODY}"
         json_post "/api/tasks/$ID/complete" "$BODY"
         ;;
+      get)
+        shift 2
+        ID=""
+        while [[ $# -gt 0 ]]; do case "$1" in --id) ID="$2"; shift 2;; *) shift;; esac done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        json_get "/api/tasks/$ID"
+        ;;
+      subscribe)
+        shift 2
+        ID=""
+        while [[ $# -gt 0 ]]; do case "$1" in --id) ID="$2"; shift 2;; *) shift;; esac done
+        [ -z "$ID" ] && echo "Error: --id is required" && exit 2
+        json_post "/api/tasks/$ID/subscribe" "{}"
+        ;;
       sync)
         json_post "/api/tasks/sync-from-github" "{}"
         ;;
-      *) echo "Usage: cc task <create|list|update|complete|sync>"; exit 2;;
+      *) echo "Usage: cc task <create|list|get|update|complete|subscribe|sync>"; exit 2;;
     esac
     ;;
 
@@ -164,7 +179,7 @@ case "${1:-help}" in
     esac
     ;;
 
-  # ── Thread commands (proxied to Companion harness) ────────────
+  # ── Thread commands ──────────────────────────────────────────
   thread)
     case "${2:-list}" in
       list)
@@ -183,16 +198,19 @@ case "${1:-help}" in
           esac
         done
         [ -z "$NAME" ] && echo "Error: --name is required" && exit 2
-        BODY="{\"title\":\"$NAME\""
-        [ -n "$PARTICIPANTS" ] && BODY="$BODY,\"participantIds\":[$(echo "$PARTICIPANTS" | sed 's/[^,]*/\"&\"/g')]"
-        BODY="$BODY}"
+        if [ -n "$PARTICIPANTS" ]; then
+          PARTS_JSON=$(echo "$PARTICIPANTS" | tr ',' '\n' | jq -Rn '[inputs | {participantType: "assistant", participantId: .}]')
+          BODY=$(jq -nc --arg t "$NAME" --argjson p "$PARTS_JSON" '{title: $t, participants: $p}')
+        else
+          BODY=$(jq -nc --arg t "$NAME" '{title: $t}')
+        fi
         json_post "/api/threads" "$BODY"
         ;;
       *) echo "Usage: cc thread <list|create>"; exit 2;;
     esac
     ;;
 
-  # ── Message commands (proxied to Companion harness) ───────────
+  # ── Message commands ─────────────────────────────────────────
   msg)
     case "${2:-}" in
       send)
@@ -207,7 +225,7 @@ case "${1:-help}" in
         done
         [ -z "$THREAD" ] && echo "Error: --thread is required" && exit 2
         [ -z "$TEXT" ] && echo "Error: --text is required" && exit 2
-        json_post "/api/harness/message/send" "{\"thread_id\":\"$THREAD\",\"text\":\"$TEXT\",\"channel\":\"webui\"}"
+        json_post "/api/message" "{\"thread_id\":\"$THREAD\",\"text\":\"$TEXT\",\"sender\":\"$AGENT\",\"source\":\"cli\"}"
         ;;
       history)
         shift 2
@@ -223,6 +241,149 @@ case "${1:-help}" in
         json_get "/api/threads/$THREAD/messages?limit=$LIMIT"
         ;;
       *) echo "Usage: cc msg <send|history>"; exit 2;;
+    esac
+    ;;
+
+  # ── KB commands ───────────────────────────────────────────────
+  kb)
+    case "${2:-list}" in
+      list)
+        json_get "/api/kb/list"
+        ;;
+      read)
+        shift 2
+        FILE="" SECTION=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            --section) SECTION="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        QUERY="file=$FILE"
+        [ -n "$SECTION" ] && QUERY="$QUERY&section=$SECTION"
+        json_get "/api/kb/read?$QUERY"
+        ;;
+      write)
+        shift 2
+        FILE="" CONTENT=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            --content) CONTENT="$2"; shift 2;;
+            --content-file) CONTENT="$(cat "$2")"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        [ -z "$CONTENT" ] && echo "Error: --content or --content-file is required" && exit 2
+        BODY=$(jq -nc --arg f "$FILE" --arg c "$CONTENT" '{file:$f, content:$c}')
+        json_post "/api/kb/write" "$BODY"
+        ;;
+      append)
+        shift 2
+        FILE="" TEXT=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            --text) TEXT="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        [ -z "$TEXT" ] && echo "Error: --text is required" && exit 2
+        BODY=$(jq -nc --arg f "$FILE" --arg t "$TEXT" '{file:$f, text:$t}')
+        json_post "/api/kb/append" "$BODY"
+        ;;
+      search)
+        shift 2
+        QUERY="" FILE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --query|-q) QUERY="$2"; shift 2;;
+            --file) FILE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$QUERY" ] && echo "Error: --query is required" && exit 2
+        PARAMS="q=$QUERY"
+        [ -n "$FILE" ] && PARAMS="$PARAMS&file=$FILE"
+        json_get "/api/kb/search?$PARAMS"
+        ;;
+      sections)
+        shift 2
+        FILE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        json_get "/api/kb/sections?file=$FILE"
+        ;;
+      patch)
+        shift 2
+        FILE="" FIND="" REPLACE="" SECTION="" CONTENT="" APPEND="" REPLACE_ALL="false"
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            --find) FIND="$2"; shift 2;;
+            --replace) REPLACE="$2"; shift 2;;
+            --section) SECTION="$2"; shift 2;;
+            --content) CONTENT="$2"; shift 2;;
+            --append) APPEND="$2"; shift 2;;
+            --replace-all) REPLACE_ALL="true"; shift;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        if [ -n "$FIND" ]; then
+          BODY=$(jq -nc --arg f "$FILE" --arg fi "$FIND" --arg r "$REPLACE" --argjson ra "$REPLACE_ALL" \
+            '{file:$f, find:$fi, replace:$r, replace_all:$ra}')
+        elif [ -n "$APPEND" ]; then
+          if [ -n "$SECTION" ]; then
+            BODY=$(jq -nc --arg f "$FILE" --arg a "$APPEND" --arg s "$SECTION" '{file:$f, append:$a, section:$s}')
+          else
+            BODY=$(jq -nc --arg f "$FILE" --arg a "$APPEND" '{file:$f, append:$a}')
+          fi
+        elif [ -n "$SECTION" ] && [ -n "$CONTENT" ]; then
+          BODY=$(jq -nc --arg f "$FILE" --arg s "$SECTION" --arg c "$CONTENT" '{file:$f, section:$s, content:$c}')
+        else
+          echo "Error: provide --find/--replace, --append, or --section/--content"; exit 2
+        fi
+        json_post "/api/kb/patch" "$BODY"
+        ;;
+      delete)
+        shift 2
+        FILE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        BODY=$(jq -nc --arg f "$FILE" '{file:$f}')
+        json_post "/api/kb/delete" "$BODY"
+        ;;
+      delete-section)
+        shift 2
+        FILE="" SECTION=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            --section) SECTION="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        [ -z "$SECTION" ] && echo "Error: --section is required" && exit 2
+        BODY=$(jq -nc --arg f "$FILE" --arg s "$SECTION" '{file:$f, section:$s}')
+        json_post "/api/kb/delete-section" "$BODY"
+        ;;
+      *) echo "Usage: cc kb <list|read|write|append|search|sections|patch|delete|delete-section>"; exit 2;;
     esac
     ;;
 
@@ -285,6 +446,30 @@ for s, n in sorted(by_state.items()):
 " 2>/dev/null || json_get "/api/tasks"
     ;;
 
+  # ── Project commands ───────────────────────────────────────────
+  project)
+    case "${2:-list}" in
+      list)
+        json_get "/api/projects"
+        ;;
+      create)
+        shift 2
+        DIR="" CAPTAIN="Captain"
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --directory|--dir) DIR="$2"; shift 2;;
+            --captain) CAPTAIN="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$DIR" ] && echo "Error: --directory is required" && exit 2
+        BODY=$(jq -nc --arg d "$DIR" --arg c "$CAPTAIN" '{directory: $d, captainName: $c}')
+        json_post "/api/projects" "$BODY"
+        ;;
+      *) echo "Usage: cc project <list|create>"; exit 2;;
+    esac
+    ;;
+
   status)
     echo "=== Projects ==="
     json_get "/api/registry"
@@ -316,6 +501,57 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     exec node dist/index.js
     ;;
 
+  build)
+    cd "$DIR"
+    echo "[cc] Building TypeScript..."
+    npx tsc -p tsconfig.json
+    echo "[cc] Build complete."
+    ;;
+
+  restart)
+    cd "$DIR"
+    shift
+    WAKE="" WAKE_THREAD="main"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --wake) WAKE="$2"; shift 2;;
+        --wake-thread) WAKE_THREAD="$2"; shift 2;;
+        *) shift;;
+      esac
+    done
+    # Default wake message if none provided
+    [ -z "$WAKE" ] && WAKE="Gateway restarted. Resume your previous work."
+    echo "[cc] Building TypeScript..."
+    npx tsc -p tsconfig.json || { echo "[cc] Build failed, aborting restart."; exit 1; }
+    echo "[cc] Stopping gateway on port $CC_PORT..."
+    kill $(lsof -ti :$CC_PORT) 2>/dev/null
+    sleep 1
+    echo "[cc] Starting gateway..."
+    export CC_ROOT="$DIR"
+    nohup node dist/index.js > /tmp/cc-gateway.log 2>&1 &
+    NEW_PID=$!
+    # Wait for gateway to be healthy (up to 15s)
+    echo "[cc] Waiting for gateway to come up..."
+    for i in $(seq 1 15); do
+      if curl -s "http://localhost:${CC_PORT}/api/registry" > /dev/null 2>&1; then
+        echo "[cc] Gateway restarted (PID $NEW_PID). Logs: /tmp/cc-gateway.log"
+        # Always send wake-up message so the agent resumes
+        sleep 1  # brief pause for bridges to reconnect
+        echo "[cc] Sending wake-up message to thread '$WAKE_THREAD'..."
+        curl -s -X POST "http://localhost:${CC_PORT}/api/message" \
+          -H 'Content-Type: application/json' \
+          -H "X-Project-Id: $PROJECT" \
+          -H "X-Agent-Id: $AGENT" \
+          -d "{\"thread_id\":\"$WAKE_THREAD\",\"text\":\"[system restart complete] $WAKE\",\"sender\":\"system\",\"source\":\"restart\"}" > /dev/null
+        echo "[cc] Wake-up sent."
+        exit 0
+      fi
+      sleep 1
+    done
+    echo "[cc] Gateway failed to start within 15s. Check /tmp/cc-gateway.log"
+    exit 1
+    ;;
+
   # ── Help ──────────────────────────────────────────────────────
   help|--help|-h)
     echo "Command Center CLI"
@@ -327,6 +563,7 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     echo "  task list     [--state <s>] [--assignee <a>]"
     echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>]"
     echo "  task complete --id <id> [--note <n>]"
+    echo "  task subscribe --id <id>  Subscribe to task updates"
     echo "  task sync     Sync GitHub issues to tasks"
     echo ""
     echo "Agent Management:"
@@ -336,11 +573,28 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     echo "  agent update  --id <id> [--status <s>] [--role <r>]"
     echo "  agent delete  --id <id>"
     echo ""
-    echo "Threads & Messages (proxied to Companion):"
+    echo "Knowledge Base:"
+    echo "  kb list"
+    echo "  kb read       --file <f> [--section <s>]"
+    echo "  kb write      --file <f> --content <c>"
+    echo "  kb append     --file <f> --text <t>"
+    echo "  kb search     --query <q> [--file <f>]"
+    echo "  kb sections   --file <f>"
+    echo "  kb patch      --file <f> --find <old> --replace <new> [--replace-all]"
+    echo "  kb patch      --file <f> --section <s> --content <c>"
+    echo "  kb patch      --file <f> --append <text> [--section <s>]"
+    echo "  kb delete     --file <f>"
+    echo "  kb delete-section --file <f> --section <s>"
+    echo ""
+    echo "Threads & Messages:"
     echo "  thread list   [limit]"
     echo "  thread create --name <n> [--participants <p1,p2>]"
     echo "  msg send      --thread <id> --text <t>"
     echo "  msg history   --thread <id> [--limit <n>]"
+    echo ""
+    echo "Project Management:"
+    echo "  project list"
+    echo "  project create --directory <path> [--captain <name>]"
     echo ""
     echo "Harness:"
     echo "  exec <cmd>    Execute a bash command via the harness [--cwd <dir>] [--timeout <s>]"
@@ -353,6 +607,10 @@ if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
     echo ""
     echo "Gateway:"
     echo "  start         Start the Command Center gateway"
+    echo "  build         Build TypeScript (compile only)"
+    echo "  restart       Build + restart the gateway (background)"
+    echo "                [--wake <msg>] Custom wake-up message (default: resume prompt)"
+    echo "                [--wake-thread <id>] Thread for wake-up (default: main)"
     echo ""
     echo "Environment:"
     echo "  CC_PORT       Gateway port (default: 3300)"

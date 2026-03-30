@@ -4,7 +4,7 @@
  * Lightweight HTTP server that:
  *   - Serves the unified Command Center UI
  *   - Maintains a project registry (loaded from YAML configs)
- *   - Proxies /api/* requests to the correct project instance
+ *   - Manages threads, messages, and Claude bridges natively
  *   - Exposes /api/registry for the project list
  */
 
@@ -12,13 +12,14 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { URL } from "node:url";
-import { spawn, exec, type ChildProcess } from "node:child_process";
+import { exec, execFileSync } from "node:child_process";
 import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
-import { AgentStore } from "./agent-store.js";
-
-/** Directory where project YAML configs live (set during start) */
-let projectConfigDir = "";
+import { AgentStore, CAPTAIN_IDENTITY, CAPTAIN_TOOLS } from "./agent-store.js";
+import { ThreadStore } from "./thread-store.js";
+import { ClaudeBridge, type AssistantTextPayload, type ResultPayload } from "./claude-bridge.js";
+import { SseHub } from "./sse-hub.js";
+import { KbManager } from "./kb-manager.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -46,6 +47,22 @@ export interface GatewayOptions {
   configDir: string;
 }
 
+/** Canonical message structure — every message flows through this. */
+export interface ChannelMessage {
+  projectId: string;
+  threadId: string;
+  sender: {
+    id: string;           // "ning", "captain", "ios-lead", "system"
+    type: "user" | "assistant" | "system";
+  };
+  channel: "thread";      // future: "dm", "broadcast"
+  mode: "text";           // future: "voice"
+  content: string;
+  kind?: "message" | "thought" | "system";
+  source?: string;        // "webui" | "cli" | "assistant" | "gateway" | "task-update"
+  metadata?: Record<string, unknown>;
+}
+
 /* ------------------------------------------------------------------ */
 /*  MIME types                                                         */
 /* ------------------------------------------------------------------ */
@@ -70,7 +87,13 @@ export class Gateway {
   private readonly githubPlugins: Map<string, GitHubPlugin>;
   private readonly taskStores: Map<string, TaskStore>;
   private readonly agentStores: Map<string, AgentStore>;
-  private readonly instances: Map<string, ChildProcess> = new Map();
+  private readonly threadStores: Map<string, ThreadStore> = new Map();
+  private readonly kbManagers: Map<string, KbManager> = new Map();
+  /** Bridges keyed by "projectId:agentId" */
+  private readonly claudeBridges: Map<string, ClaudeBridge> = new Map();
+  private readonly sseHub = new SseHub();
+  /** Next available worker port per project */
+  private readonly nextWorkerPort: Map<string, number> = new Map();
   private readonly uiDir: string;
   private readonly dataDir: string;
   private readonly configDir: string;
@@ -91,12 +114,29 @@ export class Gateway {
     });
   }
 
+  private bridgeKey(projectId: string, agentId: string): string {
+    return `${projectId}:${agentId}`;
+  }
+
+  private allocateWsPort(projectId: string, agentId: string): number {
+    const project = this.projects.get(projectId)!;
+    if (agentId === "captain") return project.port + 10000;
+    let next = this.nextWorkerPort.get(projectId) ?? (project.port + 10100);
+    this.nextWorkerPort.set(projectId, next + 1);
+    return next;
+  }
+
   async start(): Promise<void> {
     // Initialize stores for each project
     fs.mkdirSync(this.dataDir, { recursive: true });
-    for (const [id] of this.projects) {
+    for (const [id, project] of this.projects) {
       this.taskStores.set(id, new TaskStore(path.join(this.dataDir, `${id}-tasks.db`)));
       this.agentStores.set(id, new AgentStore(path.join(this.dataDir, `${id}-agents.db`)));
+      this.threadStores.set(id, new ThreadStore(path.join(this.dataDir, `${id}-threads.db`)));
+      const kbDir = path.join(this.dataDir, "agents", id, "captain", "kb");
+      const kb = new KbManager(kbDir);
+      kb.ensureDir();
+      this.kbManagers.set(this.bridgeKey(id, "captain"), kb);
       console.log(`[gateway] Stores initialized for ${id}`);
     }
 
@@ -124,15 +164,10 @@ export class Gateway {
       }
     }
 
-    // Spawn harness instances for projects that aren't already running
+    // Start captain bridges for each project
     for (const [id, project] of this.projects) {
-      // Skip if the project already has a harness running (e.g. companion on 3100)
-      const alreadyRunning = await this.pingProject(project);
-      if (!alreadyRunning) {
-        this.spawnInstance(id);
-      } else {
-        console.log(`[gateway] Project ${id} already running on port ${project.port}`);
-      }
+      if (project.status === "inactive") continue;
+      await this.startAgentBridge(id, project, "captain");
     }
 
     this.server.listen(this.port, () => {
@@ -142,75 +177,272 @@ export class Gateway {
 
   stop(): void {
     for (const plugin of this.githubPlugins.values()) plugin.shutdown();
-    for (const [id, proc] of this.instances) {
-      console.log(`[gateway] Stopping instance ${id} (PID ${proc.pid})`);
-      proc.kill("SIGTERM");
+    for (const [id, bridge] of this.claudeBridges) {
+      console.log(`[gateway] Stopping Claude bridge for ${id}`);
+      bridge.stop();
     }
-    this.instances.clear();
+    this.claudeBridges.clear();
     this.server.close();
   }
 
+  /* ---------------------------------------------------------------- */
+  /*  Claude Bridge lifecycle                                          */
+  /* ---------------------------------------------------------------- */
+
+  private async startAgentBridge(projectId: string, project: ProjectConfig, agentId: string): Promise<ClaudeBridge> {
+    const projectDir = project.directory || this.dataDir;
+    const ccBinDir = path.resolve(this.configDir, "..", "bin");
+    const isCaptain = agentId === "captain";
+    const compositeKey = this.bridgeKey(projectId, agentId);
+
+    // Resolve KB directory
+    let kbDir: string;
+    if (isCaptain) {
+      kbDir = path.join(this.dataDir, "agents", projectId, "captain", "kb");
+      fs.mkdirSync(kbDir, { recursive: true });
+      fs.writeFileSync(path.join(kbDir, "identity.md"), CAPTAIN_IDENTITY, "utf-8");
+      fs.writeFileSync(path.join(kbDir, "tools.md"), CAPTAIN_TOOLS, "utf-8");
+    } else {
+      const agentStore = this.agentStores.get(projectId)!;
+      kbDir = agentStore.getKBDir(agentId);
+    }
+
+    // Build system prompt from KB files + project context
+    const identity = fs.readFileSync(path.join(kbDir, "identity.md"), "utf-8");
+    const tools = fs.readFileSync(path.join(kbDir, "tools.md"), "utf-8");
+    const projectContext = [
+      `## Project Context`,
+      `- **Project**: ${project.name} (id: ${projectId})`,
+      `- **Directory**: ${projectDir}`,
+      project.repo ? `- **Repo**: ${project.repo}` : null,
+      ``,
+      `You are scoped to this project only. Do not access or reference other projects, their directories, or the command-center gateway codebase. Your working directory is ${projectDir}.`,
+    ].filter(Boolean).join("\n");
+
+    const currentState = this.buildInitialStateForPrompt(projectId);
+    const systemPrompt = `${identity}\n\n${projectContext}\n\n${currentState}\n\n---\n\n${tools}`;
+
+    // Resolve agent display name for initial prompt
+    let agentName = agentId;
+    if (!isCaptain) {
+      const agentStore = this.agentStores.get(projectId);
+      agentName = agentStore?.get(agentId)?.name ?? agentId;
+    } else {
+      agentName = "Captain";
+    }
+
+    const bridge = new ClaudeBridge({
+      projectId,
+      agentId,
+      wsPort: this.allocateWsPort(projectId, agentId),
+      projectDir,
+      systemPrompt,
+      claudeCommand: process.env.CLAUDE_BIN ?? "claude",
+      mockClaude: process.env.MOCK_CLAUDE === "1",
+      ccBinDir,
+      initialPrompt: `${agentName} online — ready for work`,
+    });
+
+    // Wire bridge events — agentId captured in closure
+    bridge.on("ready", () => {
+      this.sseHub.publish(projectId, "claude_ready", { agentId, ready: true });
+      console.log(`[gateway] Claude ready for ${projectId}/${agentId}`);
+    });
+
+    bridge.on("assistant_text", (payload: AssistantTextPayload) => {
+      // Stream preview to captain bar only — not persisted.
+      // Agents must use `cc msg send` to post messages to threads.
+      this.sseHub.publish(projectId, "assistant_text", {
+        agentId,
+        content: payload.fullText,
+        createdAt: new Date().toISOString(),
+      });
+    });
+
+    bridge.on("result", (payload: ResultPayload) => {
+      // Metadata-only — the agent's actual message is sent via `cc msg send`
+      this.sseHub.publish(projectId, "claude_result", {
+        agentId,
+        sessionId: payload.sessionId,
+        totalCostUsd: payload.totalCostUsd,
+        subtype: payload.subtype,
+      });
+    });
+
+    this.claudeBridges.set(compositeKey, bridge);
+    await bridge.start();
+    return bridge;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Context builders                                                 */
+  /* ---------------------------------------------------------------- */
+
+  /** Build a snapshot of current project state for the captain's system prompt. */
+  private buildInitialStateForPrompt(projectId: string): string {
+    const lines: string[] = ["## Current State"];
+
+    const agentStore = this.agentStores.get(projectId);
+    if (agentStore) {
+      const agents = agentStore.list();
+      if (agents.length > 0) {
+        lines.push("", "### Team");
+        for (const a of agents) {
+          lines.push(`- **${a.name}** (${a.id}): ${a.role || "no role set"} [${a.status}]`);
+        }
+      }
+    }
+
+    const taskStore = this.taskStores.get(projectId);
+    if (taskStore) {
+      const tasks = taskStore.list({ limit: 20 });
+      const active = tasks.filter(t => t.state !== "done" && t.state !== "cancelled");
+      if (active.length > 0) {
+        lines.push("", "### Active Tasks");
+        for (const t of active) {
+          lines.push(`- **${t.id}**: ${t.title} [${t.state}]${t.assignee ? ` → ${t.assignee}` : ""}${t.threadId ? ` (thread: ${t.threadId})` : ""}`);
+        }
+      }
+    }
+
+    if (lines.length === 1) {
+      lines.push("", "No agents or tasks yet. This may be a new project — consider scanning the codebase and setting up the team.");
+    }
+
+    return lines.join("\n");
+  }
+
+  /** Build thread context (title + recent history) for bridge forwarding. */
+  private buildThreadContext(projectId: string, threadId: string): string {
+    const threadStore = this.threadStores.get(projectId);
+    if (!threadStore) return `[thread:${threadId}]`;
+
+    const thread = threadStore.getThread(threadId);
+    const title = thread?.title ?? threadId;
+    const lines: string[] = [`[thread:${threadId} "${title}"]`];
+
+    const messages = threadStore.getMessages(threadId, { limit: 15 });
+    if (messages.length > 0) {
+      lines.push("", "--- Recent thread history ---");
+      for (const m of messages) {
+        const sender = m.sender ?? m.role;
+        const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
+        lines.push(`[${time}] ${sender}: ${m.content}`);
+      }
+      lines.push("--- End of history ---", "");
+    }
+
+    return lines.join("\n");
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Unified message pipeline                                         */
+  /* ---------------------------------------------------------------- */
+
+  /** Format a ChannelMessage into the text string sent to a Claude bridge. */
+  private formatForBridge(msg: ChannelMessage): string {
+    const now = new Date();
+    const timestamp = now.toLocaleString("en-US", {
+      weekday: "short", year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+    });
+    const threadContext = this.buildThreadContext(msg.projectId, msg.threadId);
+    return [
+      `[${timestamp}]`,
+      threadContext,
+      `[from: ${msg.sender.id} (${msg.sender.type}) via ${msg.source ?? "unknown"}]`,
+      ``,
+      msg.content,
+    ].join("\n");
+  }
+
   /**
-   * Spawn a harness instance for a project as a child process.
-   * Uses the companion harness (createInstance) with project-specific config.
+   * Single entry point for all messages. Persists, broadcasts via SSE,
+   * and fans out to participant bridges.
    */
-  spawnInstance(projectId: string): void {
+  private dispatchMessage(msg: ChannelMessage): void {
+    const threadStore = this.threadStores.get(msg.projectId);
+    if (!threadStore) return;
+
+    // 1. Persist
+    const role: "user" | "assistant" = msg.sender.type === "user" ? "user" : "assistant";
+    threadStore.insertMessage(msg.threadId, role, msg.content, {
+      kind: msg.kind,
+      sender: msg.sender.id,
+      source: msg.source,
+      metadata: {
+        ...msg.metadata,
+        senderType: msg.sender.type,
+        channel: msg.channel,
+        mode: msg.mode,
+      },
+    });
+
+    // 2. Broadcast to UI via SSE
+    this.sseHub.publish(msg.projectId, "thread_message", {
+      threadId: msg.threadId,
+      sender: msg.sender,
+      channel: msg.channel,
+      mode: msg.mode,
+      content: msg.content,
+      kind: msg.kind ?? "message",
+      source: msg.source,
+      createdAt: new Date().toISOString(),
+    });
+
+    // 3. Fan out to participant bridges (skip sender)
+    void this.fanOutToBridges(msg);
+  }
+
+  /** Forward a message to all participant bridges except the sender's. */
+  private async fanOutToBridges(msg: ChannelMessage): Promise<void> {
+    const threadStore = this.threadStores.get(msg.projectId);
+    if (!threadStore) return;
+
+    const participants = threadStore.getParticipants(msg.threadId);
+    const formatted = this.formatForBridge(msg);
+
+    for (const p of participants) {
+      if (p.participantType !== "assistant") continue;
+      if (p.participantId === msg.sender.id) continue;
+
+      const bridge = await this.ensureBridge(msg.projectId, p.participantId);
+      if (!bridge?.isReady()) continue;
+
+      bridge.sendUserMessage(formatted, msg.threadId, msg.sender.id);
+    }
+  }
+
+  /** Look up an existing bridge for an agent. */
+  private resolveBridge(projectId: string, agentId: string): ClaudeBridge | undefined {
+    return this.claudeBridges.get(this.bridgeKey(projectId, agentId));
+  }
+
+  /** Get or on-demand spawn a bridge for an agent. Returns undefined for archived/stopped agents. */
+  private async ensureBridge(projectId: string, agentId: string): Promise<ClaudeBridge | undefined> {
+    const existing = this.resolveBridge(projectId, agentId);
+    if (existing) return existing;
+
+    const agentStore = this.agentStores.get(projectId);
+    if (agentId !== "captain") {
+      const agent = agentStore?.get(agentId);
+      if (!agent || agent.status === "archived" || agent.status === "stopped") return undefined;
+    }
+
     const project = this.projects.get(projectId);
-    if (!project) {
-      console.warn(`[gateway] Cannot spawn instance: unknown project ${projectId}`);
-      return;
+    if (!project) return undefined;
+
+    console.log(`[gateway] On-demand bridge spawn for ${projectId}/${agentId}`);
+    const bridge = await this.startAgentBridge(projectId, project, agentId);
+
+    // Wait for ready (up to 30s)
+    if (!bridge.isReady()) {
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => resolve(), 30_000);
+        bridge.once("ready", () => { clearTimeout(timeout); resolve(); });
+      });
     }
-    if (this.instances.has(projectId)) {
-      console.warn(`[gateway] Instance already running for ${projectId}`);
-      return;
-    }
-
-    // Use the Command Center's own harness entry point
-    const entryPoint = path.join(import.meta.dirname, "harness-entry.js");
-    if (!fs.existsSync(entryPoint)) {
-      console.warn(`[gateway] Harness entry not found at ${entryPoint} — skipping instance spawn for ${projectId}`);
-      return;
-    }
-
-    // Resolve agent directory
-    const agentDir = path.join(this.dataDir, "agents", "captain");
-
-    const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
-      UI_PORT: String(project.port),
-      PROJECT_DIR: this.dataDir,
-      AGENT_DIR: agentDir,
-      COMPANION_DIST: process.env.COMPANION_DIST ?? path.resolve(__dirname, "../../companion/dist"),
-      MOCK_CLAUDE: process.env.MOCK_CLAUDE ?? "0",
-    };
-
-    console.log(`[gateway] Spawning harness instance for ${projectId} on port ${project.port}`);
-    const child = spawn("node", [entryPoint], {
-      cwd: process.cwd(),
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    child.stdout?.on("data", (data: Buffer) => {
-      const lines = data.toString().trim().split("\n");
-      for (const line of lines) {
-        console.log(`[${projectId}] ${line}`);
-      }
-    });
-
-    child.stderr?.on("data", (data: Buffer) => {
-      const lines = data.toString().trim().split("\n");
-      for (const line of lines) {
-        console.error(`[${projectId}:err] ${line}`);
-      }
-    });
-
-    child.on("exit", (code) => {
-      console.log(`[gateway] Instance ${projectId} exited (code ${code})`);
-      this.instances.delete(projectId);
-    });
-
-    this.instances.set(projectId, child);
+    return bridge;
   }
 
   /* ---------------------------------------------------------------- */
@@ -229,13 +461,10 @@ export class Gateway {
         this.handleRegistryList(res);
         return;
       }
-
-      // --- Project endpoints ---
       if (method === "GET" && pathname === "/api/projects") {
         this.handleRegistryList(res);
         return;
       }
-
       if (method === "POST" && pathname === "/api/projects") {
         await this.handleCreateProject(req, res);
         return;
@@ -243,29 +472,76 @@ export class Gateway {
 
       const healthMatch = pathname.match(/^\/api\/registry\/([^/]+)\/health$/);
       if (method === "GET" && healthMatch) {
-        await this.handleHealthCheck(healthMatch[1], res);
+        this.handleHealthCheck(healthMatch[1], res);
         return;
       }
 
-      // --- GitHub data endpoints (served by gateway directly) ---
+      // --- SSE events (native) ---
+      if (method === "GET" && pathname === "/api/events") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        this.sseHub.addClient(res, projectId);
+        return;
+      }
+
+      // --- Thread endpoints (native) ---
+      if (pathname.startsWith("/api/threads")) {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const store = this.threadStores.get(projectId);
+        if (!store) { this.sendJson(res, 404, { error: `No thread store for project: ${projectId}` }); return; }
+        await this.handleThreadRequest(method, pathname, req, res, store, projectId);
+        return;
+      }
+
+      // --- Message endpoint (native) ---
+      if (method === "POST" && pathname === "/api/message") {
+        await this.handleSendMessage(req, res, parsed);
+        return;
+      }
+
+      // --- Status endpoint (native) ---
+      if (method === "GET" && pathname === "/api/status") {
+        const projectId = this.resolveProjectId(req, parsed);
+        const bridge = projectId ? this.claudeBridges.get(this.bridgeKey(projectId, "captain")) : undefined;
+        this.sendJson(res, 200, { ready: bridge?.isReady() ?? false });
+        return;
+      }
+
+      // --- Assistants endpoint (alias for agents) ---
+      if (method === "GET" && pathname === "/api/assistants") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const store = this.agentStores.get(projectId);
+        if (!store) { this.sendJson(res, 200, { assistants: [] }); return; }
+        this.sendJson(res, 200, { assistants: store.list() });
+        return;
+      }
+
+      // --- GitHub data endpoints ---
       if (method === "GET" && (pathname === "/api/board" || pathname === "/api/actions" || pathname === "/api/pulls")) {
         const projectId = this.resolveProjectId(req, parsed);
-        if (!projectId) {
-          this.sendJson(res, 400, { error: "Missing project context." });
-          return;
-        }
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
         const ghPlugin = this.githubPlugins.get(projectId);
-        if (!ghPlugin) {
-          this.sendJson(res, 404, { error: `No GitHub plugin for project: ${projectId}` });
-          return;
-        }
+        if (!ghPlugin) { this.sendJson(res, 404, { error: `No GitHub plugin for project: ${projectId}` }); return; }
         if (pathname === "/api/board") {
           this.sendJson(res, 200, ghPlugin.getBoard());
         } else if (pathname === "/api/actions") {
           this.sendJson(res, 200, { runs: ghPlugin.getActions(), lastUpdated: new Date().toISOString() });
-        } else if (pathname === "/api/pulls") {
+        } else {
           this.sendJson(res, 200, { pulls: ghPlugin.getPulls(), lastUpdated: new Date().toISOString() });
         }
+        return;
+      }
+
+      // --- KB endpoints ---
+      if (pathname.startsWith("/api/kb")) {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const agentId = this.resolveAgentId(req, parsed) ?? "captain";
+        const kb = this.resolveKb(projectId, agentId);
+        if (!kb) { this.sendJson(res, 404, { error: `No KB for ${projectId}/${agentId}` }); return; }
+        await this.handleKbRequest(method, pathname, req, res, kb);
         return;
       }
 
@@ -279,17 +555,17 @@ export class Gateway {
         return;
       }
 
-      // --- Agent endpoints (served by gateway) ---
+      // --- Agent endpoints ---
       if (pathname.startsWith("/api/agents")) {
         const projectId = this.resolveProjectId(req, parsed);
         if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
         const store = this.agentStores.get(projectId);
         if (!store) { this.sendJson(res, 404, { error: `No agent store for project: ${projectId}` }); return; }
-        await this.handleAgentRequest(method, pathname, req, res, store);
+        await this.handleAgentRequest(method, pathname, req, res, store, projectId);
         return;
       }
 
-      // --- Ops endpoint (GitHub Actions via plugin) ---
+      // --- Ops endpoint ---
       if (method === "GET" && pathname === "/api/ops") {
         const projectId = this.resolveProjectId(req, parsed);
         if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
@@ -304,7 +580,7 @@ export class Gateway {
         return;
       }
 
-      // --- Task endpoints (served by gateway) ---
+      // --- Task endpoints ---
       if (pathname.startsWith("/api/tasks")) {
         const projectId = this.resolveProjectId(req, parsed);
         if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
@@ -314,19 +590,9 @@ export class Gateway {
         return;
       }
 
-      // --- Proxy /api/* to project instance ---
+      // --- Catch-all for unknown API routes ---
       if (pathname.startsWith("/api/")) {
-        const projectId = this.resolveProjectId(req, parsed);
-        if (!projectId) {
-          this.sendJson(res, 400, { error: "Missing project context. Set X-Project-Id header or ?projectId= query param." });
-          return;
-        }
-        const project = this.projects.get(projectId);
-        if (!project) {
-          this.sendJson(res, 404, { error: `Unknown project: ${projectId}` });
-          return;
-        }
-        await this.proxyRequest(req, res, project);
+        this.sendJson(res, 404, { error: `Unknown endpoint: ${method} ${pathname}` });
         return;
       }
 
@@ -346,18 +612,11 @@ export class Gateway {
 
   private handleRegistryList(res: http.ServerResponse): void {
     const projects = Array.from(this.projects.values()).map((p) => ({
-      id: p.id,
-      name: p.name,
-      port: p.port,
-      repo: p.repo,
-      status: p.status,
+      id: p.id, name: p.name, port: p.port, repo: p.repo, status: p.status,
     }));
     this.sendJson(res, 200, { projects });
   }
 
-  /**
-   * Create a new project: write YAML config, initialize stores, add to registry.
-   */
   private async handleCreateProject(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await this.readBody(req);
     const { directory, captainName } = body;
@@ -371,7 +630,6 @@ export class Gateway {
       return;
     }
 
-    // Derive project ID from directory name
     const dirName = path.basename(directory.replace(/\/+$/, ""));
     const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
@@ -385,9 +643,8 @@ export class Gateway {
     let port = 3200;
     while (usedPorts.has(port)) port++;
 
-    // Build project config
     const name = dirName.charAt(0).toUpperCase() + dirName.slice(1);
-    const config: ProjectConfig = { id, name, port, repo: "", status: "active" };
+    const config: ProjectConfig = { id, name, port, repo: "", status: "active", directory };
 
     // Write YAML config file
     fs.mkdirSync(this.configDir, { recursive: true });
@@ -400,180 +657,154 @@ export class Gateway {
     ].join("\n") + "\n";
     fs.writeFileSync(path.join(this.configDir, `${id}.yaml`), yamlContent, "utf-8");
 
-    // Initialize task and agent stores
+    // Initialize stores
     fs.mkdirSync(this.dataDir, { recursive: true });
-    const taskStore = new TaskStore(path.join(this.dataDir, `${id}-tasks.db`));
-    const agentStore = new AgentStore(path.join(this.dataDir, `${id}-agents.db`));
-    this.taskStores.set(id, taskStore);
-    this.agentStores.set(id, agentStore);
-
-    // Create a Captain agent
+    this.taskStores.set(id, new TaskStore(path.join(this.dataDir, `${id}-tasks.db`)));
+    this.agentStores.set(id, new AgentStore(path.join(this.dataDir, `${id}-agents.db`)));
+    this.threadStores.set(id, new ThreadStore(path.join(this.dataDir, `${id}-threads.db`)));
+    const kbDir = path.join(this.dataDir, "agents", id, "captain", "kb");
+    const kb = new KbManager(kbDir);
+    kb.ensureDir();
+    this.kbManagers.set(this.bridgeKey(id, "captain"), kb);
+    const agentStore = this.agentStores.get(id)!;
     agentStore.create({ name: captainName, role: "Project lead — coordinates work, manages the team, triages issues", createdBy: "system", isCaptain: true });
 
-    // Add to in-memory project map
     this.projects.set(id, config);
-
     console.log(`[gateway] Created project '${id}' (port ${port}, captain: ${captainName})`);
 
-    // Spawn harness instance for the new project
-    this.spawnInstance(id);
+    // Start Claude bridge for the new project
+    await this.startAgentBridge(id, config, "captain");
 
     this.sendJson(res, 201, { project: config });
   }
 
-  private async handleHealthCheck(projectId: string, res: http.ServerResponse): Promise<void> {
+  private handleHealthCheck(projectId: string, res: http.ServerResponse): void {
     const project = this.projects.get(projectId);
     if (!project) {
       this.sendJson(res, 404, { error: `Unknown project: ${projectId}` });
       return;
     }
-
-    try {
-      const healthy = await this.pingProject(project);
-      this.sendJson(res, 200, {
-        id: project.id,
-        name: project.name,
-        healthy,
-        port: project.port,
-      });
-    } catch {
-      this.sendJson(res, 200, {
-        id: project.id,
-        name: project.name,
-        healthy: false,
-        port: project.port,
-      });
-    }
-  }
-
-  /**
-   * Quick TCP-level health check: try to GET /api/status on the project port.
-   */
-  private pingProject(project: ProjectConfig): Promise<boolean> {
-    return new Promise((resolve) => {
-      const req = http.request(
-        { hostname: "127.0.0.1", port: project.port, path: "/api/status", method: "GET", timeout: 2000 },
-        (res) => {
-          // Drain the response
-          res.resume();
-          resolve(res.statusCode === 200);
-        },
-      );
-      req.on("error", () => resolve(false));
-      req.on("timeout", () => {
-        req.destroy();
-        resolve(false);
-      });
-      req.end();
+    const bridge = this.claudeBridges.get(this.bridgeKey(projectId, "captain"));
+    this.sendJson(res, 200, {
+      id: project.id,
+      name: project.name,
+      healthy: bridge?.isReady() ?? false,
+      port: project.port,
     });
   }
 
   /* ---------------------------------------------------------------- */
-  /*  Proxy                                                            */
+  /*  Thread endpoints (native)                                        */
   /* ---------------------------------------------------------------- */
 
-  private resolveProjectId(req: http.IncomingMessage, parsed: URL): string | null {
-    // Header takes priority
-    const header = req.headers["x-project-id"];
-    if (typeof header === "string" && header.length > 0) return header;
-
-    // Fall back to query param
-    const param = parsed.searchParams.get("projectId");
-    if (param) return param;
-
-    // If there's only one project, use it as default
-    if (this.projects.size === 1) {
-      return this.projects.keys().next().value ?? null;
-    }
-
-    return null;
-  }
-
-  private async proxyRequest(
-    clientReq: http.IncomingMessage,
-    clientRes: http.ServerResponse,
-    project: ProjectConfig,
+  private async handleThreadRequest(
+    method: string,
+    pathname: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    store: ThreadStore,
+    projectId: string,
   ): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const proxyReq = http.request(
-        {
-          hostname: "127.0.0.1",
-          port: project.port,
-          path: clientReq.url,
-          method: clientReq.method,
-          headers: {
-            ...clientReq.headers,
-            host: `127.0.0.1:${project.port}`,
-          },
-        },
-        (proxyRes) => {
-          clientRes.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-          proxyRes.pipe(clientRes);
-          proxyRes.on("end", resolve);
-        },
-      );
-
-      proxyReq.on("error", (err) => {
-        console.error(`[gateway] Proxy error for ${project.id}:`, err.message);
-        if (!clientRes.headersSent) {
-          this.sendJson(clientRes, 502, { error: `Project ${project.id} is unreachable` });
-        }
-        resolve();
-      });
-
-      // Pipe the client request body to the proxy
-      clientReq.pipe(proxyReq);
-    });
-  }
-
-  /* ---------------------------------------------------------------- */
-  /*  Static files                                                     */
-  /* ---------------------------------------------------------------- */
-
-  private serveStatic(pathname: string, res: http.ServerResponse): void {
-    // Default to index.html
-    let filePath = pathname === "/" ? "/index.html" : pathname;
-
-    const fullPath = path.join(this.uiDir, filePath);
-
-    // Prevent directory traversal
-    if (!fullPath.startsWith(this.uiDir)) {
-      res.writeHead(403);
-      res.end("Forbidden");
+    // GET /api/threads
+    if (method === "GET" && pathname === "/api/threads") {
+      this.sendJson(res, 200, { threads: store.listThreadsWithParticipants() });
       return;
     }
 
-    // Check if file exists
-    try {
-      const stat = fs.statSync(fullPath);
-      if (!stat.isFile()) {
-        // Try appending .html
-        const htmlPath = fullPath + ".html";
-        if (fs.existsSync(htmlPath)) {
-          this.streamFile(htmlPath, res);
-          return;
-        }
-        res.writeHead(404);
-        res.end("Not found");
-        return;
-      }
-      this.streamFile(fullPath, res);
-    } catch {
-      res.writeHead(404);
-      res.end("Not found");
+    // POST /api/threads
+    if (method === "POST" && pathname === "/api/threads") {
+      const body = await this.readBody(req);
+      if (!body.title) { this.sendJson(res, 400, { error: "title is required" }); return; }
+      const participants = Array.isArray(body.participants) ? body.participants : [];
+      const thread = store.createThread({ title: body.title, participants });
+      this.sseHub.publish(projectId, "thread_created", thread);
+      this.sendJson(res, 201, { thread });
+      return;
     }
-  }
 
-  private streamFile(filePath: string, res: http.ServerResponse): void {
-    const ext = path.extname(filePath);
-    const contentType = MIME[ext] ?? "application/octet-stream";
-    res.writeHead(200, { "Content-Type": contentType });
-    fs.createReadStream(filePath).pipe(res);
+    // GET /api/threads/:id/messages
+    const messagesMatch = pathname.match(/^\/api\/threads\/([^/]+)\/messages$/);
+    if (messagesMatch && method === "GET") {
+      const threadId = decodeURIComponent(messagesMatch[1]);
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined;
+      const before = url.searchParams.get("before") ?? undefined;
+      this.sendJson(res, 200, { messages: store.getMessages(threadId, { limit, before }) });
+      return;
+    }
+
+    // GET /api/threads/:id/participants
+    const participantsMatch = pathname.match(/^\/api\/threads\/([^/]+)\/participants$/);
+    if (participantsMatch && method === "GET") {
+      const threadId = decodeURIComponent(participantsMatch[1]);
+      this.sendJson(res, 200, { participants: store.getParticipants(threadId) });
+      return;
+    }
+
+    // GET /api/threads/:id
+    const threadMatch = pathname.match(/^\/api\/threads\/([^/]+)$/);
+    if (threadMatch && method === "GET") {
+      const threadId = decodeURIComponent(threadMatch[1]);
+      const thread = store.getThread(threadId);
+      if (!thread) { this.sendJson(res, 404, { error: "Thread not found" }); return; }
+      this.sendJson(res, 200, thread);
+      return;
+    }
+
+    // PATCH /api/threads/:id
+    if (threadMatch && method === "PATCH") {
+      const threadId = decodeURIComponent(threadMatch[1]);
+      const body = await this.readBody(req);
+      const thread = store.updateThread(threadId, body);
+      this.sseHub.publish(projectId, "thread_updated", thread);
+      this.sendJson(res, 200, thread);
+      return;
+    }
+
+    // DELETE /api/threads/:id
+    if (threadMatch && method === "DELETE") {
+      const threadId = decodeURIComponent(threadMatch[1]);
+      store.updateThread(threadId, { status: "archived" });
+      this.sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    this.sendJson(res, 404, { error: "Thread endpoint not found" });
   }
 
   /* ---------------------------------------------------------------- */
-  /*  Helpers                                                          */
+  /*  Message endpoint (native)                                        */
   /* ---------------------------------------------------------------- */
+
+  private async handleSendMessage(req: http.IncomingMessage, res: http.ServerResponse, parsed: URL): Promise<void> {
+    const projectId = this.resolveProjectId(req, parsed);
+    if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+
+    const body = await this.readBody(req);
+    const text = String(body.text ?? "").trim();
+    if (!text) { this.sendJson(res, 400, { error: "text is required" }); return; }
+
+    const threadId = String(body.thread_id ?? body.threadId ?? "main");
+    const senderId = String(body.sender ?? "Ning");
+    const source = String(body.source ?? "webui");
+
+    // Determine sender type: known agent IDs are "assistant", otherwise "user"
+    const agentStore = this.agentStores.get(projectId);
+    const isAgent = senderId === "captain" || (agentStore?.get(senderId) != null);
+
+    this.dispatchMessage({
+      projectId,
+      threadId,
+      sender: { id: senderId, type: isAgent ? "assistant" : "user" },
+      channel: "thread",
+      mode: "text",
+      content: text,
+      source,
+      metadata: body.requestId ? { requestId: body.requestId } : undefined,
+    });
+
+    this.sendJson(res, 200, { ok: true, accepted: true });
+  }
 
   /* ---------------------------------------------------------------- */
   /*  Agent endpoints                                                  */
@@ -585,6 +816,7 @@ export class Gateway {
     req: http.IncomingMessage,
     res: http.ServerResponse,
     store: AgentStore,
+    projectId: string,
   ): Promise<void> {
     if (method === "GET" && pathname === "/api/agents") {
       const url = new URL(req.url ?? "/", `http://localhost`);
@@ -599,6 +831,17 @@ export class Gateway {
       const agent = store.create({
         id: body.id, name: body.name, role: body.role,
         createdBy: body.createdBy ?? "captain",
+      });
+      this.sseHub.publish(projectId, "agent_created", agent);
+      this.dispatchMessage({
+        projectId,
+        threadId: "main",
+        sender: { id: "system", type: "system" },
+        channel: "thread",
+        mode: "text",
+        content: `Agent **${agent.name}** (${agent.id}) created. Role: ${agent.role || "unspecified"}`,
+        kind: "system",
+        source: "gateway",
       });
       this.sendJson(res, 201, agent);
       return;
@@ -618,6 +861,17 @@ export class Gateway {
       if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }
       const body = await this.readBody(req);
       const agent = store.update(id, body);
+      this.sseHub.publish(projectId, "agent_updated", agent);
+      this.dispatchMessage({
+        projectId,
+        threadId: "main",
+        sender: { id: "system", type: "system" },
+        channel: "thread",
+        mode: "text",
+        content: `Agent **${agent.name}** (${agent.id}) updated${body.status ? `: status → ${body.status}` : ""}${body.role ? `: role → ${body.role}` : ""}`,
+        kind: "system",
+        source: "gateway",
+      });
       this.sendJson(res, 200, agent);
       return;
     }
@@ -625,12 +879,163 @@ export class Gateway {
     if (method === "DELETE" && pathname.startsWith("/api/agents/")) {
       const id = pathname.split("/")[3];
       if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }
+      const agent = store.get(id);
       store.archive(id);
+      // Stop agent's bridge and clean up worktree
+      const bKey = this.bridgeKey(projectId, id);
+      const agentBridge = this.claudeBridges.get(bKey);
+      if (agentBridge) {
+        agentBridge.stop();
+        this.claudeBridges.delete(bKey);
+      }
+      this.sseHub.publish(projectId, "agent_archived", { id });
+      this.dispatchMessage({
+        projectId,
+        threadId: "main",
+        sender: { id: "system", type: "system" },
+        channel: "thread",
+        mode: "text",
+        content: `Agent **${agent?.name ?? id}** (${id}) archived`,
+        kind: "system",
+        source: "gateway",
+      });
       this.sendJson(res, 200, { ok: true });
       return;
     }
 
     this.sendJson(res, 404, { error: "Agent endpoint not found" });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  KB endpoints                                                     */
+  /* ---------------------------------------------------------------- */
+
+  private async handleKbRequest(
+    method: string,
+    pathname: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    kb: KbManager,
+  ): Promise<void> {
+    const url = new URL(req.url ?? "/", `http://localhost`);
+
+    // GET /api/kb/list
+    if (method === "GET" && pathname === "/api/kb/list") {
+      this.sendJson(res, 200, { files: kb.list() });
+      return;
+    }
+
+    // GET /api/kb/read?file=X[&section=Y]
+    if (method === "GET" && pathname === "/api/kb/read") {
+      const file = url.searchParams.get("file");
+      if (!file) { this.sendJson(res, 400, { error: "file param is required" }); return; }
+      try {
+        const section = url.searchParams.get("section");
+        if (section) {
+          const result = kb.readSection(file, section);
+          if (!result) { this.sendJson(res, 404, { error: "section_not_found" }); return; }
+          this.sendJson(res, 200, { file, section: result.section, content: result.content });
+        } else {
+          this.sendJson(res, 200, { file, content: kb.read(file) });
+        }
+      } catch {
+        this.sendJson(res, 404, { error: `File not found: ${file}` });
+      }
+      return;
+    }
+
+    // GET /api/kb/sections?file=X
+    if (method === "GET" && pathname === "/api/kb/sections") {
+      const file = url.searchParams.get("file");
+      if (!file) { this.sendJson(res, 400, { error: "file param is required" }); return; }
+      try {
+        this.sendJson(res, 200, { file, sections: kb.listSections(file) });
+      } catch {
+        this.sendJson(res, 404, { error: `File not found: ${file}` });
+      }
+      return;
+    }
+
+    // GET /api/kb/search?q=X[&file=Y]
+    if (method === "GET" && pathname === "/api/kb/search") {
+      const q = url.searchParams.get("q");
+      if (!q) { this.sendJson(res, 400, { error: "q param is required" }); return; }
+      const file = url.searchParams.get("file") ?? undefined;
+      this.sendJson(res, 200, { results: kb.search(q, file) });
+      return;
+    }
+
+    // POST /api/kb/write
+    if (method === "POST" && pathname === "/api/kb/write") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      if (body.content === undefined) { this.sendJson(res, 400, { error: "content is required" }); return; }
+      kb.write(body.file, body.content);
+      this.sendJson(res, 200, { ok: true, file: body.file });
+      return;
+    }
+
+    // POST /api/kb/append
+    if (method === "POST" && pathname === "/api/kb/append") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      if (!body.text) { this.sendJson(res, 400, { error: "text is required" }); return; }
+      kb.appendNote(body.file, body.text);
+      this.sendJson(res, 200, { ok: true, file: body.file });
+      return;
+    }
+
+    // POST /api/kb/patch
+    if (method === "POST" && pathname === "/api/kb/patch") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      try {
+        const result = kb.patch(body.file, body as any);
+        this.sendJson(res, 200, { ok: true, file: body.file, ...result });
+      } catch (err: any) {
+        if (err.code === "AMBIGUOUS") {
+          this.sendJson(res, 409, { ok: false, error: "ambiguous_match", count: err.count, message: err.message });
+        } else if (err.code === "NOT_FOUND") {
+          this.sendJson(res, 404, { ok: false, error: "not_found", message: err.message });
+        } else {
+          this.sendJson(res, 400, { ok: false, error: err.message });
+        }
+      }
+      return;
+    }
+
+    // POST /api/kb/delete-section
+    if (method === "POST" && pathname === "/api/kb/delete-section") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      if (!body.section) { this.sendJson(res, 400, { error: "section is required" }); return; }
+      try {
+        const deleted = kb.deleteSection(body.file, body.section);
+        this.sendJson(res, 200, { ok: true, file: body.file, deleted_section: deleted });
+      } catch (err: any) {
+        this.sendJson(res, 404, { ok: false, error: "not_found", message: err.message });
+      }
+      return;
+    }
+
+    // POST /api/kb/delete
+    if (method === "POST" && pathname === "/api/kb/delete") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      try {
+        kb.deleteFile(body.file);
+        this.sendJson(res, 200, { ok: true, file: body.file });
+      } catch (err: any) {
+        if (err.code === "PROTECTED") {
+          this.sendJson(res, 403, { ok: false, error: "protected", message: err.message });
+        } else {
+          this.sendJson(res, 404, { ok: false, error: err.message });
+        }
+      }
+      return;
+    }
+
+    this.sendJson(res, 404, { error: "KB endpoint not found" });
   }
 
   /* ---------------------------------------------------------------- */
@@ -654,6 +1059,16 @@ export class Gateway {
       return;
     }
 
+    // GET /api/tasks/:id
+    if (method === "GET" && pathname.startsWith("/api/tasks/") && !pathname.endsWith("/complete")) {
+      const id = pathname.split("/")[3];
+      if (!id) { this.sendJson(res, 400, { error: "task id required" }); return; }
+      const task = store.get(id);
+      if (!task) { this.sendJson(res, 404, { error: `Task not found: ${id}` }); return; }
+      this.sendJson(res, 200, task);
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/tasks") {
       const body = await this.readBody(req);
       if (!body.title) { this.sendJson(res, 400, { error: "title is required" }); return; }
@@ -662,6 +1077,59 @@ export class Gateway {
         priority: body.priority, labels: body.labels, createdBy: body.createdBy ?? "unknown",
         assignee: body.assignee,
       });
+
+      // Create git worktree for this task (isolation per task)
+      const project = this.projects.get(projectId);
+      const projDir = project?.directory || this.dataDir;
+      let taskWorktree: string | undefined;
+      if (task.assignee && task.assignee !== "captain" && project) {
+        const branchName = `task/${task.id}`;
+        const worktreeDir = path.join(projDir, ".worktrees", task.id);
+        if (!fs.existsSync(worktreeDir)) {
+          fs.mkdirSync(path.join(projDir, ".worktrees"), { recursive: true });
+          try {
+            try { execFileSync("git", ["branch", branchName], { cwd: projDir, stdio: "ignore" }); } catch { /* exists */ }
+            execFileSync("git", ["worktree", "add", worktreeDir, branchName], { cwd: projDir, stdio: "ignore" });
+            taskWorktree = worktreeDir;
+            console.log(`[gateway] Created worktree for task ${task.id} at ${worktreeDir} (branch: ${branchName})`);
+          } catch (err) {
+            console.warn(`[gateway] Failed to create worktree for task ${task.id}:`, (err as Error).message);
+          }
+        }
+      }
+
+      // Auto-create a thread for this task with participants
+      const threadStore = this.threadStores.get(projectId);
+      if (threadStore) {
+        const participants: Array<{ participantType: "user" | "assistant"; participantId: string; role?: string }> = [
+          { participantType: "assistant", participantId: "captain", role: "lead" },
+        ];
+        if (task.assignee && task.assignee !== "captain") {
+          participants.push({ participantType: "assistant", participantId: task.assignee, role: "assignee" });
+        }
+        const thread = threadStore.createThread({
+          title: `${task.id}: ${task.title}`,
+          participants,
+        });
+        store.update(task.id, { threadId: thread.id } as any, task.createdBy);
+        task.threadId = thread.id;
+
+        const worktreeInfo = taskWorktree
+          ? `\nWorking directory: \`${taskWorktree}\` (branch: \`task/${task.id}\`)`
+          : "";
+        this.dispatchMessage({
+          projectId,
+          threadId: thread.id,
+          sender: { id: "system", type: "system" },
+          channel: "thread",
+          mode: "text",
+          content: `Task **${task.id}** created: ${task.title}${task.assignee ? ` (assigned to ${task.assignee})` : ""}${task.priority ? ` (priority: ${task.priority})` : ""}${worktreeInfo}`,
+          kind: "system",
+          source: "gateway",
+        });
+      }
+
+      this.sseHub.publish(projectId, "task_created", task);
       this.sendJson(res, 201, task);
       return;
     }
@@ -671,26 +1139,96 @@ export class Gateway {
       if (!id) { this.sendJson(res, 400, { error: "task id required" }); return; }
       const body = await this.readBody(req);
       const task = store.update(id, body, body.actor ?? "unknown");
+
+      // Post status update to task thread + add assignee as participant
+      if (task.threadId) {
+        const threadStore = this.threadStores.get(projectId);
+        if (threadStore) {
+          if (body.assignee) {
+            threadStore.addParticipant(task.threadId, { participantType: "assistant", participantId: body.assignee, role: "assignee" });
+          }
+          if (body.state || body.latestUpdate) {
+            const parts: string[] = [];
+            if (body.state) parts.push(`State → **${body.state}**`);
+            if (body.latestUpdate) parts.push(body.latestUpdate);
+            this.dispatchMessage({
+              projectId,
+              threadId: task.threadId,
+              sender: { id: body.actor ?? "system", type: body.actor && body.actor !== "System" ? "assistant" : "system" },
+              channel: "thread",
+              mode: "text",
+              content: parts.join(" — "),
+              kind: "system",
+              source: "task-update",
+            });
+          }
+        }
+      }
+
+      this.sseHub.publish(projectId, "task_updated", task);
       this.sendJson(res, 200, task);
       return;
     }
 
     if (method === "POST" && pathname.endsWith("/complete")) {
       const parts = pathname.split("/");
-      const id = parts[3]; // /api/tasks/T-1/complete
+      const id = parts[3];
       if (!id) { this.sendJson(res, 400, { error: "task id required" }); return; }
       const body = await this.readBody(req);
       const task = store.complete(id, body.actor ?? "unknown", body.notes);
+
+      // Post completion to task thread
+      if (task.threadId) {
+        this.dispatchMessage({
+          projectId,
+          threadId: task.threadId,
+          sender: { id: body.actor ?? "system", type: body.actor && body.actor !== "System" ? "assistant" : "system" },
+          channel: "thread",
+          mode: "text",
+          content: `Task **${task.id}** completed${body.notes ? `: ${body.notes}` : ""}`,
+          kind: "system",
+          source: "task-update",
+        });
+      }
+
+      // Clean up task worktree (agent already merged to main)
+      const completedProject = this.projects.get(projectId);
+      if (completedProject) {
+        const taskWorktreeDir = path.join(completedProject.directory || this.dataDir, ".worktrees", task.id);
+        if (fs.existsSync(taskWorktreeDir)) {
+          try {
+            execFileSync("git", ["worktree", "remove", taskWorktreeDir, "--force"], {
+              cwd: completedProject.directory || this.dataDir, stdio: "ignore",
+            });
+            console.log(`[gateway] Cleaned up worktree for completed task ${task.id}`);
+          } catch { /* ignore cleanup failures */ }
+        }
+      }
+
+      this.sseHub.publish(projectId, "task_completed", task);
       this.sendJson(res, 200, task);
+      return;
+    }
+
+    // POST /api/tasks/:id/subscribe — add the requesting agent as a thread participant
+    if (method === "POST" && pathname.match(/^\/api\/tasks\/[^/]+\/subscribe$/)) {
+      const id = pathname.split("/")[3];
+      if (!id) { this.sendJson(res, 400, { error: "task id required" }); return; }
+      const task = store.get(id);
+      if (!task) { this.sendJson(res, 404, { error: `Task not found: ${id}` }); return; }
+      if (!task.threadId) { this.sendJson(res, 400, { error: `Task ${id} has no thread` }); return; }
+      const agentId = this.resolveAgentId(req, new URL(req.url ?? "/", "http://localhost")) ?? "captain";
+      const threadStore = this.threadStores.get(projectId);
+      if (threadStore) {
+        threadStore.addParticipant(task.threadId, { participantType: "assistant", participantId: agentId, role: "subscriber" });
+      }
+      this.sendJson(res, 200, { ok: true, taskId: id, threadId: task.threadId, subscriber: agentId });
       return;
     }
 
     if (method === "POST" && pathname === "/api/tasks/sync-from-github") {
       const ghPlugin = this.githubPlugins.get(projectId);
-      if (!ghPlugin) {
-        this.sendJson(res, 404, { error: "No GitHub plugin available for this project" });
-        return;
-      }
+      if (!ghPlugin) { this.sendJson(res, 404, { error: "No GitHub plugin available for this project" }); return; }
       const synced = this.syncGithubIssuesToTasks(ghPlugin, store);
       this.sendJson(res, 200, { synced });
       return;
@@ -699,21 +1237,18 @@ export class Gateway {
     this.sendJson(res, 404, { error: "Task endpoint not found" });
   }
 
-  /**
-   * Sync open GitHub issues into the task store, skipping any that already exist.
-   * Returns the number of newly created tasks.
-   */
+  /* ---------------------------------------------------------------- */
+  /*  GitHub sync                                                      */
+  /* ---------------------------------------------------------------- */
+
   private syncGithubIssuesToTasks(ghPlugin: GitHubPlugin, store: TaskStore): number {
     const issues = ghPlugin.getIssues();
     let synced = 0;
 
     for (const issue of issues) {
       if (issue.state !== "OPEN") continue;
-
-      // Skip if a task already exists for this issue
       if (store.findByGithubIssue(issue.number)) continue;
 
-      // Derive priority from labels
       let priority: "critical" | "high" | "normal" | "low" = "normal";
       const labelNames = issue.labels.map((l) => l.toLowerCase());
       if (labelNames.includes("critical") || labelNames.includes("p0")) priority = "critical";
@@ -733,6 +1268,86 @@ export class Gateway {
     }
 
     return synced;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Helpers                                                          */
+  /* ---------------------------------------------------------------- */
+
+  private resolveProjectId(req: http.IncomingMessage, parsed: URL): string | null {
+    const header = req.headers["x-project-id"];
+    if (typeof header === "string" && header.length > 0) return header;
+    const param = parsed.searchParams.get("projectId");
+    if (param) return param;
+    if (this.projects.size === 1) {
+      return this.projects.keys().next().value ?? null;
+    }
+    return null;
+  }
+
+  private resolveAgentId(req: http.IncomingMessage, parsed: URL): string | null {
+    const header = req.headers["x-agent-id"];
+    if (typeof header === "string" && header.length > 0) return header;
+    return parsed.searchParams.get("agent") ?? null;
+  }
+
+  private resolveKb(projectId: string, agentId: string): KbManager | null {
+    const key = this.bridgeKey(projectId, agentId);
+    const existing = this.kbManagers.get(key);
+    if (existing) return existing;
+
+    let kbDir: string;
+    if (agentId === "captain") {
+      kbDir = path.join(this.dataDir, "agents", projectId, "captain", "kb");
+    } else {
+      const agentStore = this.agentStores.get(projectId);
+      if (!agentStore) return null;
+      kbDir = agentStore.getKBDir(agentId);
+    }
+    if (!fs.existsSync(kbDir)) return null;
+    const kb = new KbManager(kbDir);
+    this.kbManagers.set(key, kb);
+    return kb;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Static files                                                     */
+  /* ---------------------------------------------------------------- */
+
+  private serveStatic(pathname: string, res: http.ServerResponse): void {
+    let filePath = pathname === "/" ? "/index.html" : pathname;
+    const fullPath = path.join(this.uiDir, filePath);
+
+    if (!fullPath.startsWith(this.uiDir)) {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
+
+    try {
+      const stat = fs.statSync(fullPath);
+      if (!stat.isFile()) {
+        const htmlPath = fullPath + ".html";
+        if (fs.existsSync(htmlPath)) {
+          this.streamFile(htmlPath, res);
+          return;
+        }
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+      this.streamFile(fullPath, res);
+    } catch {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+  }
+
+  private streamFile(filePath: string, res: http.ServerResponse): void {
+    const ext = path.extname(filePath);
+    const contentType = MIME[ext] ?? "application/octet-stream";
+    res.writeHead(200, { "Content-Type": contentType });
+    fs.createReadStream(filePath).pipe(res);
   }
 
   /* ---------------------------------------------------------------- */
@@ -822,10 +1437,6 @@ export class Gateway {
 /*  Config loader                                                      */
 /* ------------------------------------------------------------------ */
 
-/**
- * Load project configs from a directory of YAML files.
- * Uses a simple line-by-line parser to avoid a YAML dependency.
- */
 export function loadProjectConfigs(dir: string): ProjectConfig[] {
   const projects: ProjectConfig[] = [];
 
@@ -850,23 +1461,19 @@ export function loadProjectConfigs(dir: string): ProjectConfig[] {
     const port = Number(config.port);
     const repo = config.repo ?? "";
     const status = config.status === "inactive" ? "inactive" : "active";
-    const directory = config.directory || undefined;
 
     if (!port || isNaN(port)) {
       console.warn(`[gateway] Skipping ${entry.name}: missing or invalid port`);
       continue;
     }
 
+    const directory = config.directory || undefined;
     projects.push({ id, name, port, repo, status, directory });
   }
 
   return projects;
 }
 
-/**
- * Minimal YAML parser for flat key: value files.
- * Handles quoted and unquoted string values, numbers.
- */
 function parseSimpleYaml(content: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const line of content.split("\n")) {
@@ -876,7 +1483,6 @@ function parseSimpleYaml(content: string): Record<string, string> {
     if (colonIdx === -1) continue;
     const key = trimmed.slice(0, colonIdx).trim();
     let value = trimmed.slice(colonIdx + 1).trim();
-    // Strip surrounding quotes
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }

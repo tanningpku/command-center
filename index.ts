@@ -52,8 +52,11 @@ async function main(): Promise<void> {
 
   await gateway.start();
 
-  // Graceful shutdown
+  // Graceful shutdown (guard against double signal)
+  let shuttingDown = false;
   const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log("[command-center] Shutting down...");
     gateway.stop();
     process.exit(0);
