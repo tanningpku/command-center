@@ -7,6 +7,18 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Login screen (shown when no valid token) -->
+  <div id="loginScreen" class="cc-login-screen" style="display: none">
+    <div class="cc-login-card">
+      <div class="cc-login-title">Command Center</div>
+      <form id="loginForm" class="cc-login-form">
+        <input id="loginPassword" class="cc-form-input" type="password" placeholder="Password" required autofocus />
+        <div id="loginError" class="cc-form-error" style="display: none"></div>
+        <button type="submit" class="cc-form-submit" id="loginSubmitBtn">Sign In</button>
+      </form>
+    </div>
+  </div>
+
   <div class="cc-shell">
     <!-- Header -->
     <header class="cc-header">
@@ -22,6 +34,7 @@
       <div class="cc-header-actions">
         <button id="settingsBtn" class="cc-header-btn" title="Settings">Settings</button>
         <button id="chatBtn" class="cc-header-btn cc-header-btn-primary" title="Chat">Chat</button>
+        <button id="logoutBtn" class="cc-header-btn" title="Sign out">Logout</button>
       </div>
     </header>
 

@@ -2,6 +2,44 @@
 // Command Center — Application Logic
 // ================================================================
 
+// ── Auth ─────────────────────────────────────────────────────────
+
+function getAuthToken() {
+  return localStorage.getItem('cc-token') || '';
+}
+
+function setAuthToken(token) {
+  localStorage.setItem('cc-token', token);
+  // Also set as cookie for SSE (EventSource can't set headers)
+  document.cookie = `cc-token=${encodeURIComponent(token)}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+}
+
+function clearAuthToken() {
+  localStorage.removeItem('cc-token');
+  document.cookie = 'cc-token=; path=/; max-age=0';
+}
+
+function showLoginScreen() {
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.querySelector('.cc-shell').style.display = 'none';
+  document.getElementById('loginPassword').focus();
+}
+
+function hideLoginScreen() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.querySelector('.cc-shell').style.display = '';
+}
+
+function handle401() {
+  clearAuthToken();
+  showLoginScreen();
+  // Close SSE
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+}
+
 // ── State ────────────────────────────────────────────────────────
 
 const state = {
@@ -109,10 +147,13 @@ function timeAgo(isoStr) {
  */
 async function apiCall(path) {
   const headers = {};
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   if (state.selectedProjectId) {
     headers['X-Project-Id'] = state.selectedProjectId;
   }
   const res = await fetch(path, { headers });
+  if (res.status === 401) { handle401(); throw new Error('Unauthorized'); }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `HTTP ${res.status}`);
@@ -125,6 +166,8 @@ async function apiCall(path) {
  */
 async function apiPost(path, body) {
   const headers = { 'Content-Type': 'application/json' };
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   if (state.selectedProjectId) {
     headers['X-Project-Id'] = state.selectedProjectId;
   }
@@ -133,6 +176,7 @@ async function apiPost(path, body) {
     headers,
     body: JSON.stringify(body),
   });
+  if (res.status === 401) { handle401(); throw new Error('Unauthorized'); }
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(data.error || `HTTP ${res.status}`);
@@ -152,7 +196,11 @@ async function agentApiCall(path, agentId) {
  * Fetch the project registry from the gateway.
  */
 async function fetchRegistry() {
-  const res = await fetch('/api/registry');
+  const headers = {};
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch('/api/registry', { headers });
+  if (res.status === 401) { handle401(); throw new Error('Unauthorized'); }
   if (!res.ok) {
     throw new Error(`Failed to fetch registry: HTTP ${res.status}`);
   }
@@ -1537,7 +1585,9 @@ function connectSSE() {
   if (!state.selectedProjectId) return;
 
   try {
-    const url = `/api/events?projectId=${encodeURIComponent(state.selectedProjectId)}`;
+    let url = `/api/events?projectId=${encodeURIComponent(state.selectedProjectId)}`;
+    const sseToken = getAuthToken();
+    if (sseToken) url += `&token=${encodeURIComponent(sseToken)}`;
     state.eventSource = new EventSource(url);
 
     state.eventSource.onmessage = (event) => {
@@ -1715,11 +1765,15 @@ document.getElementById('newProjectForm').addEventListener('submit', async (e) =
   submitBtn.textContent = 'Creating...';
 
   try {
+    const postHeaders = { 'Content-Type': 'application/json' };
+    const tok = getAuthToken();
+    if (tok) postHeaders['Authorization'] = `Bearer ${tok}`;
     const res = await fetch('/api/projects', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: postHeaders,
       body: JSON.stringify({ directory, captainName }),
     });
+    if (res.status === 401) { handle401(); return; }
     const data = await res.json();
 
     if (!res.ok) {
@@ -2042,9 +2096,53 @@ document.addEventListener('keydown', (e) => {
   _lastKey = null;
 });
 
+// ── Login Form ──────────────────────────────────────────────────
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const password = document.getElementById('loginPassword').value;
+  const errorEl = document.getElementById('loginError');
+  const submitBtn = document.getElementById('loginSubmitBtn');
+
+  errorEl.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Signing in...';
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Invalid password');
+    }
+
+    setAuthToken(data.token);
+    hideLoginScreen();
+    document.getElementById('loginPassword').value = '';
+    startApp();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = 'block';
+    document.getElementById('loginPassword').select();
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Sign In';
+  }
+});
+
+// ── Logout ──────────────────────────────────────────────────────
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  handle401();
+});
+
 // ── Initialization ───────────────────────────────────────────────
 
-(async function init() {
+async function startApp() {
   // Restore tab and thread from localStorage before loading projects
   const savedTab = localStorage.getItem('cc-activeTab');
   if (savedTab && ['home', 'team', 'board', 'threads'].includes(savedTab)) {
@@ -2056,4 +2154,14 @@ document.addEventListener('keydown', (e) => {
   }
 
   await loadProjects();
+}
+
+(function init() {
+  // Check if we already have a token
+  if (getAuthToken()) {
+    hideLoginScreen();
+    startApp();
+  } else {
+    showLoginScreen();
+  }
 })();
