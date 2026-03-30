@@ -1265,10 +1265,13 @@ export class Gateway {
     if (method === "POST" && pathname === "/api/tasks") {
       const body = await this.readBody(req);
       if (!body.title) { this.sendJson(res, 400, { error: "title is required" }); return; }
+      const collaborators = Array.isArray(body.collaborators) ? body.collaborators
+        : typeof body.collaborators === "string" ? body.collaborators.split(",").map((s: string) => s.trim()).filter(Boolean)
+        : undefined;
       const task = store.create({
         title: body.title, description: body.description, githubIssue: body.githubIssue,
         priority: body.priority, labels: body.labels, createdBy: body.createdBy ?? "unknown",
-        assignee: body.assignee,
+        assignee: body.assignee, collaborators,
       });
 
       // Create git worktree for this task (isolation per task)
@@ -1299,6 +1302,11 @@ export class Gateway {
         ];
         if (task.assignee && task.assignee !== "captain") {
           participants.push({ participantType: "assistant", participantId: task.assignee, role: "assignee" });
+        }
+        for (const collab of task.collaborators) {
+          if (collab !== "captain" && collab !== task.assignee) {
+            participants.push({ participantType: "assistant", participantId: collab, role: "collaborator" });
+          }
         }
         const thread = threadStore.createThread({
           title: `${task.id}: ${task.title}`,
@@ -1339,6 +1347,14 @@ export class Gateway {
         if (threadStore) {
           if (body.assignee) {
             threadStore.addParticipant(task.threadId, { participantType: "assistant", participantId: body.assignee, role: "assignee" });
+          }
+          if (body.collaborators) {
+            const collabs = Array.isArray(body.collaborators) ? body.collaborators
+              : typeof body.collaborators === "string" ? body.collaborators.split(",").map((s: string) => s.trim()).filter(Boolean)
+              : [];
+            for (const collab of collabs) {
+              threadStore.addParticipant(task.threadId, { participantType: "assistant", participantId: collab, role: "collaborator" });
+            }
           }
           if (body.state || body.latestUpdate) {
             const parts: string[] = [];
