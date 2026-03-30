@@ -112,7 +112,7 @@ struct ChatView: View {
                 Button {
                     voiceModeEnabled.toggle()
                     if voiceModeEnabled {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticManager.light()
                     }
                 } label: {
                     Image(systemName: voiceModeEnabled ? "mic.fill" : "mic.slash")
@@ -259,12 +259,13 @@ struct ChatView: View {
                         )
                         threadStore.messages.append(local)
                     }
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    HapticManager.success()
                 } catch {
                     speechService.error = "Upload failed: \(error.localizedDescription)"
                 }
             } else if !text.isEmpty {
                 // Text-only message
+                HapticManager.light()
                 await threadStore.sendMessage(text: text, threadId: threadId)
             }
             if let proxy = scrollProxy { scrollToBottom(proxy: proxy) }
@@ -294,7 +295,7 @@ struct ChatView: View {
                 transcribeAndSend(url: url)
             }
 
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            HapticManager.medium()
             speechService.startRecording()
             voiceState = .recording
         }
@@ -322,7 +323,7 @@ struct ChatView: View {
                 if !text.isEmpty {
                     await threadStore.sendMessage(text: text, threadId: threadId, source: "ios-voice")
                     if let proxy = scrollProxy { scrollToBottom(proxy: proxy) }
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    HapticManager.success()
                 }
             } catch {
                 speechService.error = "Transcription failed: \(error.localizedDescription)"

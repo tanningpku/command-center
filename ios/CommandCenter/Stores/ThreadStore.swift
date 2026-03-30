@@ -10,16 +10,23 @@ class ThreadStore {
     var isLoadingThreads = false
     var isLoadingMessages = false
     var isConnected = false
+    var isStale = false
     var error: String?
 
     /// Callbacks for routing SSE events to other stores
     var onAgentEvent: ((String, [String: Any]) -> Void)?
     var onTaskEvent: ((String, [String: Any]) -> Void)?
 
+    /// Called when SSE reconnects so views can reload data
+    var onReconnect: (() -> Void)?
+
     private let api: APIService
     private let sseService: SSEService
     private var sseTask: Task<Void, Never>?
     private var seenContentHashes: Set<String> = []
+    private var wasConnected = false
+
+    private static let cacheKey = "threads"
 
     init(api: APIService, sseService: SSEService) {
         self.api = api
@@ -33,7 +40,18 @@ class ThreadStore {
         do {
             let response = try await api.fetchThreads()
             threads = response.threads.sorted { $0.updatedAt > $1.updatedAt }
+            isStale = false
+            // Cache for offline
+            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+                CacheManager.save(threads, key: Self.cacheKey, projectId: projectId)
+            }
         } catch {
+            // Fall back to cache
+            if threads.isEmpty, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey),
+               let cached = CacheManager.load([CCThread].self, key: Self.cacheKey, projectId: projectId) {
+                threads = cached
+                isStale = true
+            }
             self.error = error.localizedDescription
         }
         isLoadingThreads = false
@@ -85,7 +103,15 @@ class ThreadStore {
         disconnectSSE()
         sseTask = Task {
             let stream = await sseService.events(baseURL: baseURL, projectId: projectId)
-            await MainActor.run { isConnected = true }
+            await MainActor.run {
+                let reconnecting = wasConnected
+                isConnected = true
+                isStale = false
+                wasConnected = true
+                if reconnecting {
+                    onReconnect?()
+                }
+            }
             for await event in stream {
                 await handleSSEEvent(event)
             }

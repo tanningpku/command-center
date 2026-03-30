@@ -15,3 +15,24 @@ struct ConnectionDot: View {
         }
     }
 }
+
+/// Banner shown when data is stale (loaded from cache while offline).
+struct StaleBanner: View {
+    let isStale: Bool
+
+    var body: some View {
+        if isStale {
+            HStack(spacing: 6) {
+                Image(systemName: "icloud.slash")
+                    .font(.caption2)
+                Text("Offline — showing cached data")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(Color.orange)
+        }
+    }
+}

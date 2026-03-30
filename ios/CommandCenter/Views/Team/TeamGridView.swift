@@ -15,6 +15,15 @@ struct TeamGridView: View {
                 if teamStore.isLoading && teamStore.agents.isEmpty {
                     ProgressView("Loading team...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = teamStore.error, teamStore.agents.isEmpty {
+                    ContentUnavailableView {
+                        Label("Load Failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") { Task { await teamStore.loadAgents() } }
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else if teamStore.agents.isEmpty {
                     ContentUnavailableView("No Agents", systemImage: "person.3",
                         description: Text("Agents will appear here when added to the project."))
@@ -30,7 +39,10 @@ struct TeamGridView: View {
                         }
                         .padding()
                     }
-                    .refreshable { await teamStore.loadAgents() }
+                    .refreshable {
+                        HapticManager.light()
+                        await teamStore.loadAgents()
+                    }
                 }
             }
             .navigationTitle("Team")
@@ -47,6 +59,9 @@ struct TeamGridView: View {
             }
             .navigationDestination(for: CCAgent.self) { agent in
                 AgentDetailView(agent: agent)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                StaleBanner(isStale: teamStore.isStale)
             }
             .task { await teamStore.loadAgents() }
             .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in

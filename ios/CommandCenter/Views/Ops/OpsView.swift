@@ -11,6 +11,15 @@ struct OpsView: View {
                 if opsStore.isLoading && opsStore.builds.isEmpty && opsStore.pulls.isEmpty {
                     ProgressView("Loading ops...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = opsStore.error, opsStore.builds.isEmpty && opsStore.pulls.isEmpty {
+                    ContentUnavailableView {
+                        Label("Load Failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") { Task { await opsStore.load() } }
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else if opsStore.builds.isEmpty && opsStore.pulls.isEmpty {
                     ContentUnavailableView("No CI Data", systemImage: "gearshape.2",
                         description: Text("CI builds and PRs will appear here when a GitHub repo is configured."))
@@ -34,7 +43,7 @@ struct OpsView: View {
                     }
                     .listStyle(.insetGrouped)
                     .refreshable {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticManager.light()
                         await opsStore.load()
                     }
                 }

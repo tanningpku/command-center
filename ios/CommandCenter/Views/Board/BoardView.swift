@@ -18,6 +18,15 @@ struct BoardView: View {
                 if boardStore.isLoading && boardStore.tasks.isEmpty {
                     ProgressView("Loading board...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = boardStore.error, boardStore.tasks.isEmpty {
+                    ContentUnavailableView {
+                        Label("Load Failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") { Task { await boardStore.loadTasks() } }
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else if boardStore.tasks.isEmpty {
                     ContentUnavailableView("No Tasks", systemImage: "rectangle.split.3x1",
                         description: Text("Tasks will appear here when created."))
@@ -51,6 +60,10 @@ struct BoardView: View {
                             }
                         }
                     }
+                    .refreshable {
+                        HapticManager.light()
+                        await boardStore.loadTasks()
+                    }
                 }
             }
             .navigationTitle("Board")
@@ -67,6 +80,9 @@ struct BoardView: View {
             }
             .sheet(item: $selectedTask) { task in
                 TaskDetailSheet(task: task)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                StaleBanner(isStale: boardStore.isStale)
             }
             .task { await boardStore.loadTasks() }
             .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in

@@ -56,6 +56,14 @@ struct CommandCenterApp: App {
         threadStore.onTaskEvent = { type, payload in
             boardStore.handleTaskEvent(type: type, payload: payload)
         }
+        threadStore.onReconnect = {
+            // Auto-reload all data when SSE reconnects
+            Task {
+                await threadStore.loadThreads()
+                await boardStore.loadTasks()
+                await teamStore.loadAgents()
+            }
+        }
     }
 
     private func reconnectSSE() {

@@ -6,12 +6,15 @@ import SwiftUI
 class BoardStore {
     var tasks: [CCTask] = []
     var isLoading = false
+    var isStale = false
     var error: String?
 
     private let api: APIService
 
     /// Kanban column definitions (non-terminal states shown as active columns)
     static let columns: [TaskState] = [.created, .assigned, .in_progress, .in_review, .qa, .blocked, .done]
+
+    private static let cacheKey = "tasks"
 
     init(api: APIService) {
         self.api = api
@@ -23,7 +26,18 @@ class BoardStore {
         do {
             let response = try await api.fetchTasks()
             tasks = response.tasks
+            isStale = false
+            // Cache for offline
+            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+                CacheManager.save(response.tasks, key: Self.cacheKey, projectId: projectId)
+            }
         } catch {
+            // Fall back to cache
+            if tasks.isEmpty, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey),
+               let cached = CacheManager.load([CCTask].self, key: Self.cacheKey, projectId: projectId) {
+                tasks = cached
+                isStale = true
+            }
             self.error = error.localizedDescription
         }
         isLoading = false
@@ -43,13 +57,25 @@ class BoardStore {
         case "task_created":
             if !tasks.contains(where: { $0.id == task.id }) {
                 tasks.append(task)
+                HapticManager.light()
             }
-        case "task_updated", "task_completed":
+        case "task_updated":
+            if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
+                let oldState = tasks[idx].state
+                tasks[idx] = task
+                if task.state != oldState {
+                    HapticManager.medium()
+                }
+            } else {
+                tasks.append(task)
+            }
+        case "task_completed":
             if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
                 tasks[idx] = task
             } else {
                 tasks.append(task)
             }
+            HapticManager.success()
         default: break
         }
     }
