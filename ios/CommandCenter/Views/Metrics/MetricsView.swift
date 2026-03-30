@@ -68,6 +68,7 @@ struct MetricsView: View {
                 }
             }
             .navigationTitle("Metrics")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProjectSelectorView()

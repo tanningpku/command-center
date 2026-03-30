@@ -59,6 +59,10 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await threadStore.loadMessages(threadId: threadId)
+            // Scroll to bottom after initial load
+            if let proxy = scrollProxy {
+                scrollToBottom(proxy: proxy)
+            }
             // Get API service from the base URL
             if let url = AppConfig.baseURL {
                 apiService = APIService(baseURL: url)

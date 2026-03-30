@@ -29,6 +29,7 @@ struct BoardView: View {
                 }
             }
             .navigationTitle("Board")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProjectSelectorView()

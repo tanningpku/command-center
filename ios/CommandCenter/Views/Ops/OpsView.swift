@@ -40,6 +40,7 @@ struct OpsView: View {
                 }
             }
             .navigationTitle("Ops")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProjectSelectorView()

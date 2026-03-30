@@ -34,6 +34,7 @@ struct TeamGridView: View {
                 }
             }
             .navigationTitle("Team")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProjectSelectorView()
