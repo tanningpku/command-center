@@ -22,7 +22,7 @@ done
 
 # ── Install hook mode ──────────────────────────────────────────────
 if [ "$INSTALL_HOOK" = "true" ]; then
-  HOOK_DIR="$(cd "$PROJECT_DIR" && git rev-parse --git-path hooks)"
+  HOOK_DIR="$(cd "$PROJECT_DIR" && git rev-parse --absolute-git-dir)/hooks"
   mkdir -p "$HOOK_DIR"
   HOOK_PATH="$HOOK_DIR/pre-push"
   cat > "$HOOK_PATH" <<'HOOK'
@@ -75,10 +75,9 @@ echo ""
 echo "━━━ Stage 2: iOS Build (optional) ━━━"
 echo ""
 
-echo "[ci] Pinging Mac Mini ($SSH_HOST)..."
-HOST_IP="${SSH_HOST#*@}"
-if ! ping -c 1 -W 2 "$HOST_IP" >/dev/null 2>&1; then
-  echo "[ci] WARNING: Mac Mini ($HOST_IP) is not reachable — skipping iOS build"
+echo "[ci] Checking Mac Mini ($SSH_HOST) reachability..."
+if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$SSH_HOST" true >/dev/null 2>&1; then
+  echo "[ci] WARNING: Mac Mini ($SSH_HOST) is not reachable via SSH — skipping iOS build"
   echo "[ci] This is expected when not on the local network"
   exit 0
 fi
