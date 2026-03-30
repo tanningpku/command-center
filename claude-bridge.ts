@@ -270,6 +270,9 @@ export class ClaudeBridge extends EventEmitter {
   private killChild(): void {
     this._ready = false;
     this.hasInitialized = false;
+    // Reset watchdog state — interrupted turn is no longer in-flight
+    this.lastUserMessageAt = 0;
+    this.lastActivityAt = Date.now();
     if (this.child) {
       this.child.removeAllListeners("exit");
       this.child.kill();
