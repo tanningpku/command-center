@@ -15,9 +15,10 @@ struct ChatView: View {
     @State private var voiceState: VoiceState = .idle
     @State private var apiService: APIService?
 
-    // Image
-    @State private var showPhotoPicker = false
+    // Image draft
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var draftImageData: Data?
+    @State private var draftImage: UIImage?
     @State private var isUploading = false
 
     enum VoiceState {
@@ -46,6 +47,35 @@ struct ChatView: View {
 
                 Divider()
 
+                // Draft image preview
+                if let draftImage {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(uiImage: draftImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 60, height: 60)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        Text("Add a caption...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button {
+                            self.draftImageData = nil
+                            self.draftImage = nil
+                            self.selectedPhoto = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(.systemGray6))
+                }
+
                 // Input bar
                 chatInputBar
             }
@@ -72,7 +102,7 @@ struct ChatView: View {
             }
         }
         .onChange(of: selectedPhoto) { _, newItem in
-            if let newItem { handlePhotoSelection(newItem) }
+            if let newItem { loadPhotoDraft(newItem) }
         }
     }
 
@@ -89,21 +119,22 @@ struct ChatView: View {
             .disabled(isUploading)
 
             // Text field
-            TextField("Type a message...", text: $inputText, axis: .vertical)
+            TextField(draftImage != nil ? "Add context..." : "Type a message...", text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .padding(10)
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 20))
-                .onSubmit { if canSend { sendText() } }
+                .onSubmit { if canSend { sendMessage() } }
 
-            // Voice / Send button
-            if canSend {
-                Button { sendText() } label: {
+            // Send / Voice button
+            if canSend || draftImage != nil {
+                Button { sendMessage() } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
                         .foregroundStyle(.blue)
                 }
+                .disabled(isUploading)
             } else {
                 Button { toggleVoice() } label: {
                     Image(systemName: voiceState == .transcribing ? "ellipsis.circle" : "mic.circle.fill")
@@ -162,11 +193,33 @@ struct ChatView: View {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func sendText() {
-        let text = inputText
+    private func sendMessage() {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let imageData = draftImageData
+
         inputText = ""
+        draftImageData = nil
+        draftImage = nil
+        selectedPhoto = nil
+
         Task {
-            await threadStore.sendMessage(text: text, threadId: threadId)
+            if let imageData, let api = apiService {
+                // Upload image with optional caption
+                isUploading = true
+                defer { isUploading = false }
+                do {
+                    _ = try await api.uploadImage(
+                        imageData: imageData, fileName: "screenshot.jpg",
+                        caption: text.isEmpty ? nil : text, threadId: threadId
+                    )
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } catch {
+                    speechService.error = "Upload failed: \(error.localizedDescription)"
+                }
+            } else if !text.isEmpty {
+                // Text-only message
+                await threadStore.sendMessage(text: text, threadId: threadId)
+            }
             if let proxy = scrollProxy { scrollToBottom(proxy: proxy) }
         }
     }
@@ -183,7 +236,7 @@ struct ChatView: View {
     }
 
     private func startRecording() {
-        Task {
+        Task { @MainActor in
             let authorized = await speechService.requestAuthorization()
             guard authorized else {
                 speechService.error = "Microphone permission denied"
@@ -230,24 +283,11 @@ struct ChatView: View {
         }
     }
 
-    private func handlePhotoSelection(_ item: PhotosPickerItem) {
-        isUploading = true
+    private func loadPhotoDraft(_ item: PhotosPickerItem) {
         Task {
-            defer {
-                isUploading = false
-                selectedPhoto = nil
-            }
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let api = apiService else { return }
-            do {
-                _ = try await api.uploadImage(
-                    imageData: data, fileName: "screenshot.jpg",
-                    caption: nil, threadId: threadId
-                )
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-            } catch {
-                speechService.error = "Upload failed: \(error.localizedDescription)"
-            }
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+            draftImageData = data
+            draftImage = UIImage(data: data)
         }
     }
 

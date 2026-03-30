@@ -39,6 +39,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Command Center uses the microphone for voice input to send messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Command Center uses your photo library to share screenshots and images.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
