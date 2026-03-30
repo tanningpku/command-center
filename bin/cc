@@ -546,16 +546,17 @@ for s, n in sorted(by_state.items()):
         ;;
       create)
         shift 2
-        DIR="" CAPTAIN="Captain"
+        NAME="" DIR="" CAPTAIN="Captain"
         while [[ $# -gt 0 ]]; do
           case "$1" in
+            --name) NAME="$2"; shift 2;;
             --directory|--dir) DIR="$2"; shift 2;;
             --captain) CAPTAIN="$2"; shift 2;;
             *) shift;;
           esac
         done
-        [ -z "$DIR" ] && echo "Error: --directory is required" && exit 2
-        BODY=$(jq -nc --arg d "$DIR" --arg c "$CAPTAIN" '{directory: $d, captainName: $c}')
+        [ -z "$NAME" ] && [ -z "$DIR" ] && echo "Error: --name is required (e.g. --name my-project)" && exit 2
+        BODY=$(jq -nc --arg n "$NAME" --arg d "$DIR" --arg c "$CAPTAIN" '{name: $n, directory: (if $d == "" then null else $d end), captainName: $c}')
         json_post "/api/projects" "$BODY"
         ;;
       *) echo "Usage: cc project <list|create>"; exit 2;;
@@ -729,7 +730,7 @@ print(f'{display_name} | Tasks: {tasks_summary} | Agents: {agents_summary}')
     echo ""
     echo "Project Management:"
     echo "  project list"
-    echo "  project create --directory <path> [--captain <name>]"
+    echo "  project create --name <name> [--directory <path>] [--captain <name>]"
     echo ""
     echo "Harness:"
     echo "  exec <cmd>    Execute a bash command via the harness [--cwd <dir>] [--timeout <s>]"

@@ -792,24 +792,37 @@ export class Gateway {
 
   private async handleCreateProject(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await this.readBody(req);
-    const { directory, captainName } = body;
+    const projectName = typeof body.name === "string" ? body.name : (typeof body.projectName === "string" ? body.projectName : "");
+    let directory = typeof body.directory === "string" ? body.directory : "";
+    const captainName = typeof body.captainName === "string" && body.captainName ? body.captainName : "Captain";
 
-    if (!directory || typeof directory !== "string") {
-      this.sendJson(res, 400, { error: "directory is required (e.g. /home/ning/code/my-project)" });
+    // Require at least a name or directory
+    if (!projectName && !directory) {
+      this.sendJson(res, 400, { error: "name is required (e.g. 'my-project')" });
       return;
     }
-    if (!captainName || typeof captainName !== "string") {
-      this.sendJson(res, 400, { error: "captainName is required" });
-      return;
+
+    // Default directory to ~/code/<name> if not provided
+    if (!directory) {
+      const home = process.env.HOME || "/home/" + (process.env.USER || "user");
+      directory = path.join(home, "code", projectName);
     }
 
-    const dirName = path.basename(directory.replace(/\/+$/, ""));
+    const dirName = projectName || path.basename(directory.replace(/\/+$/, ""));
     const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
+    if (!id) {
+      this.sendJson(res, 400, { error: "name must contain at least one alphanumeric character" });
+      return;
+    }
 
     if (this.projects.has(id)) {
       this.sendJson(res, 409, { error: `Project '${id}' already exists` });
       return;
     }
+
+    // Ensure project directory exists (after duplicate check)
+    fs.mkdirSync(directory, { recursive: true });
 
     // Auto-assign next available port starting from 3200
     const usedPorts = new Set(Array.from(this.projects.values()).map((p) => p.port));
