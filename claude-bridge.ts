@@ -197,7 +197,9 @@ export class ClaudeBridge extends EventEmitter {
     if (context) parts.push(context);
     parts.push(`${sender ?? "User"}: ${text}`);
     this.send(buildUserMessage(parts.join("\n")));
-    this.lastUserMessageAt = Date.now();
+    const ts = Date.now();
+    this.lastUserMessageAt = ts;
+    this.lastActivityAt = ts; // Reset so watchdog gives a full timeout window
   }
 
   /* ---- Child process management ---- */
@@ -362,6 +364,7 @@ export class ClaudeBridge extends EventEmitter {
 
     // Result — turn complete
     if (type === "result") {
+      this.lastUserMessageAt = 0; // Turn done — stop watchdog monitoring
       this.emit("result", {
         sessionId: String(message.session_id ?? ""),
         totalCostUsd: Number(message.total_cost_usd ?? 0),
