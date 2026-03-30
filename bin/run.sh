@@ -103,7 +103,7 @@ while true; do
   sleep "$BACKOFF"
 
   # Check max restarts (after sleep, before next launch)
-  if [ "$MAX_RESTARTS" -gt 0 ] && [ "$RESTART_COUNT" -gt "$MAX_RESTARTS" ]; then
+  if [ "$MAX_RESTARTS" -gt 0 ] && [ "$RESTART_COUNT" -ge "$MAX_RESTARTS" ]; then
     log "Reached max restarts ($MAX_RESTARTS). Giving up."
     exit 1
   fi
