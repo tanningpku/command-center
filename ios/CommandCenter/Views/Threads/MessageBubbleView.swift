@@ -41,12 +41,16 @@ struct MessageBubbleView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // Message content
-                    MarkdownTextView(message.content, foregroundColor: message.isUser ? .white : .primary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(message.isUser ? Color.blue : Color(.systemGray5))
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                    // Image or text content
+                    if let imagePaths = message.extractImagePaths, !imagePaths.isEmpty {
+                        imageContent(paths: imagePaths)
+                    } else {
+                        MarkdownTextView(message.content, foregroundColor: message.isUser ? .white : .primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(message.isUser ? Color.blue : Color(.systemGray5))
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                    }
 
                     // Timestamp
                     Text(message.displayTime)
@@ -61,6 +65,46 @@ struct MessageBubbleView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 2)
         }
+    }
+
+    @ViewBuilder
+    private func imageContent(paths: [String]) -> some View {
+        VStack(spacing: 4) {
+            ForEach(paths, id: \.self) { imagePath in
+                if let url = imageURL(for: imagePath) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 240, maxHeight: 320)
+                        case .failure:
+                            Label("Image failed to load", systemImage: "photo.badge.exclamationmark")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(10)
+                        case .empty:
+                            ProgressView()
+                                .frame(width: 120, height: 80)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+        .padding(4)
+        .background(message.isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func imageURL(for path: String) -> URL? {
+        guard let base = AppConfig.baseURL else { return nil }
+        var components = URLComponents(url: base.appendingPathComponent("api/harness/media"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "path", value: path)]
+        return components?.url
     }
 }
 
