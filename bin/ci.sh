@@ -22,7 +22,9 @@ done
 
 # ── Install hook mode ──────────────────────────────────────────────
 if [ "$INSTALL_HOOK" = "true" ]; then
-  HOOK_PATH="$PROJECT_DIR/.git/hooks/pre-push"
+  HOOK_DIR="$(cd "$PROJECT_DIR" && git rev-parse --git-path hooks)"
+  mkdir -p "$HOOK_DIR"
+  HOOK_PATH="$HOOK_DIR/pre-push"
   cat > "$HOOK_PATH" <<'HOOK'
 #!/usr/bin/env bash
 # Pre-push hook: run TypeScript validation before pushing
