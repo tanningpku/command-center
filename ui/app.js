@@ -12,15 +12,15 @@ const state = {
   eventSource: null,
   activeThreadId: null,
   threads: [],
+  tasksByThreadId: {},
+  agentDetailId: null,       // Currently open agent detail panel
+  agentDetailTab: 'instruction', // 'instruction' or 'kb'
 };
 
 // ── DOM References ───────────────────────────────────────────────
 
 const dom = {
-  projectSwitcherBtn:  document.getElementById('projectSwitcherBtn'),
-  projectSwitcherName: document.getElementById('projectSwitcherName'),
-  projectDropdown:     document.getElementById('projectSwitcherDropdown'),
-  projectDropdownList: document.getElementById('projectDropdownList'),
+  projectSelect:      document.getElementById('projectSelect'),
   tabNav:             document.getElementById('tabNav'),
   emptyState:         document.getElementById('emptyState'),
   teamGrid:           document.getElementById('teamGrid'),
@@ -39,6 +39,19 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = String(str);
   return div.innerHTML;
+}
+
+// Render markdown for chat messages using marked.js
+function renderMarkdown(str) {
+  if (typeof marked === 'undefined') return escapeHtml(str);
+  try {
+    // Escape raw HTML tags before markdown parsing to prevent DOM injection
+    // (e.g. literal <textarea> in message content would swallow subsequent HTML)
+    const safe = String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return marked.parse(safe, { breaks: true, gfm: true });
+  } catch (_) {
+    return escapeHtml(str);
+  }
 }
 
 function timeAgo(isoStr) {
@@ -94,6 +107,14 @@ async function apiPost(path, body) {
 }
 
 /**
+ * Make an API call with agent scope (adds agent query param for KB endpoints).
+ */
+async function agentApiCall(path, agentId) {
+  const sep = path.includes('?') ? '&' : '?';
+  return apiCall(`${path}${sep}agent=${encodeURIComponent(agentId)}`);
+}
+
+/**
  * Fetch the project registry from the gateway.
  */
 async function fetchRegistry() {
@@ -110,62 +131,43 @@ async function loadProjects() {
   try {
     const data = await fetchRegistry();
     state.projects = data.projects || data || [];
-    renderProjectDropdown();
+    renderProjectList();
 
-    // Auto-select first project
+    // Auto-select: use saved project if valid, otherwise first project
     if (state.projects.length > 0 && !state.selectedProjectId) {
-      selectProject(state.projects[0].id);
+      const savedProjectId = localStorage.getItem('cc-selectedProjectId');
+      const target = savedProjectId && state.projects.find(p => p.id === savedProjectId)
+        ? savedProjectId
+        : state.projects[0].id;
+      selectProject(target);
     }
   } catch (err) {
     console.error('Failed to load projects:', err);
-    dom.projectSwitcherName.textContent = 'Connecting...';
+    dom.projectSelect.innerHTML = `<option value="">Retrying...</option>`;
     // Retry after 5s
     setTimeout(loadProjects, 5000);
   }
 }
 
-function renderProjectDropdown() {
+function renderProjectList() {
   if (state.projects.length === 0) {
-    dom.projectDropdownList.innerHTML = `
-      <div class="cc-project-dropdown-empty">No projects registered.</div>
-    `;
+    dom.projectSelect.innerHTML = `<option value="">No projects</option>`;
     return;
   }
 
-  dom.projectDropdownList.innerHTML = state.projects.map(project => {
-    const isActive = project.id === state.selectedProjectId;
-    const statusClass = project.status || 'running';
-    return `
-      <div class="cc-project-dropdown-item ${isActive ? 'active' : ''}"
-           data-project-id="${escapeHtml(project.id)}">
-        <span class="cc-project-dot ${escapeHtml(statusClass)}"></span>
-        <span class="cc-project-dropdown-name">${escapeHtml(project.name)}</span>
-      </div>
-    `;
+  dom.projectSelect.innerHTML = state.projects.map(project => {
+    const isSelected = project.id === state.selectedProjectId;
+    const label = project.name || project.id;
+    return `<option value="${escapeHtml(project.id)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
   }).join('');
-}
-
-function toggleProjectDropdown() {
-  const isOpen = dom.projectDropdown.style.display !== 'none';
-  dom.projectDropdown.style.display = isOpen ? 'none' : 'block';
-}
-
-function closeProjectDropdown() {
-  dom.projectDropdown.style.display = 'none';
 }
 
 function selectProject(projectId) {
   state.selectedProjectId = projectId;
+  localStorage.setItem('cc-selectedProjectId', projectId);
 
-  // Update dropdown highlights and close it
-  renderProjectDropdown();
-  closeProjectDropdown();
-
-  // Find the project info
-  const project = state.projects.find(p => p.id === projectId);
-
-  // Update switcher button text
-  dom.projectSwitcherName.textContent = project ? project.name : projectId;
+  // Update the header dropdown to reflect current selection
+  dom.projectSelect.value = projectId;
 
   // Show tab nav
   dom.tabNav.style.display = 'flex';
@@ -184,6 +186,7 @@ function selectProject(projectId) {
 
 function showTab(tabName) {
   state.activeTab = tabName;
+  localStorage.setItem('cc-activeTab', tabName);
 
   // Update nav tab highlights
   dom.navTabs.forEach(btn => {
@@ -194,13 +197,6 @@ function showTab(tabName) {
   document.querySelectorAll('.cc-tab-content').forEach(el => {
     el.style.display = 'none';
   });
-
-  // Reset agent detail panel when switching tabs
-  const detailPanel = document.getElementById('agentDetailPanel');
-  if (detailPanel) {
-    detailPanel.style.display = 'none';
-    dom.teamGrid.style.display = '';
-  }
 
   // Show selected tab
   const tabEl = document.getElementById(`tab-${tabName}`);
@@ -241,9 +237,9 @@ async function loadTeamData() {
   dom.teamGrid.innerHTML = `<div class="cc-loading">Loading team...</div>`;
 
   try {
-    const data = await apiCall('/api/agents');
-    const agents = data.agents || data || [];
-    state.teamData = agents;
+    const data = await apiCall('/api/assistants');
+    const assistants = data.assistants || data || [];
+    state.teamData = assistants;
     renderTeam();
   } catch (err) {
     console.error('Failed to load team:', err);
@@ -300,7 +296,6 @@ function renderTeamCard(member) {
   const status = member.status || 'offline';
   const statusClass = status === 'online' || status === 'active' ? 'cc-status-online' : 'cc-status-offline';
   const statusLabel = status === 'online' || status === 'active' ? 'Online' : 'Offline';
-  const role = member.role || '';
 
   return `
     <div class="cc-team-card cc-team-card-clickable" data-agent-id="${escapeHtml(member.id)}">
@@ -311,8 +306,8 @@ function renderTeamCard(member) {
           <div class="cc-team-card-type">${escapeHtml(typeLabel)}</div>
         </div>
       </div>
-      ${role ? `<div class="cc-team-card-role">${escapeHtml(role)}</div>` : ''}
-      ${member.description && member.description !== role ? `<div class="cc-team-detail" style="margin-bottom: 4px;">${escapeHtml(member.description)}</div>` : ''}
+      ${member.role ? `<div class="cc-team-card-role">${escapeHtml(member.role)}</div>` : ''}
+      ${member.description && !member.role ? `<div class="cc-team-detail" style="margin-bottom: 4px;">${escapeHtml(member.description)}</div>` : ''}
       <div class="cc-team-card-status ${statusClass}">
         <span class="cc-status-dot"></span>
         ${escapeHtml(statusLabel)}
@@ -335,91 +330,164 @@ function renderTeamCard(member) {
 
 // ── Agent Detail Panel ──────────────────────────────────────────
 
-function showAgentDetail(agentId) {
-  const member = state.teamData.find(m => m.id === agentId);
+function openAgentDetail(agentId) {
+  state.agentDetailId = agentId;
+  state.agentDetailTab = 'instruction';
+  renderAgentDetailPanel();
+}
+
+function closeAgentDetail() {
+  state.agentDetailId = null;
+  const panel = document.getElementById('agentDetailPanel');
+  if (panel) panel.remove();
+}
+
+function renderAgentDetailPanel() {
+  const member = state.teamData.find(m => m.id === state.agentDetailId);
   if (!member) return;
 
-  // Hide grid, show detail panel
-  dom.teamGrid.style.display = 'none';
-  const panel = document.getElementById('agentDetailPanel');
-  panel.style.display = 'block';
+  // Remove existing panel if any
+  let panel = document.getElementById('agentDetailPanel');
+  if (panel) panel.remove();
 
-  // Populate header
-  document.getElementById('agentDetailName').textContent = member.name || member.id;
-  const statusBadge = document.getElementById('agentDetailStatus');
-  const status = member.status || 'offline';
-  const isOnline = status === 'online' || status === 'active';
-  statusBadge.textContent = isOnline ? 'Online' : 'Offline';
-  statusBadge.className = `cc-agent-detail-status-badge ${isOnline ? 'cc-status-online' : 'cc-status-offline'}`;
+  const displayName = member.name || member.id;
+  const isAgent = member.type === 'agent' || member.type === 'assistant' || member.type === 'personal' || member.type === 'coding' || member.type === 'captain';
+  const initial = (displayName).charAt(0).toUpperCase();
+  const avatarClass = isAgent ? 'cc-avatar-agent' : 'cc-avatar-user';
+  const activeTab = state.agentDetailTab;
 
-  // Role
-  const roleEl = document.getElementById('agentDetailRole');
-  roleEl.textContent = member.role || '';
-  roleEl.style.display = member.role ? 'block' : 'none';
+  const panelHtml = `
+    <div id="agentDetailPanel" class="cc-agent-detail-overlay">
+      <div class="cc-agent-detail-panel">
+        <div class="cc-agent-detail-header">
+          <div class="cc-agent-detail-header-info">
+            <div class="cc-avatar ${avatarClass}" style="width:36px;height:36px;font-size:15px;">${escapeHtml(initial)}</div>
+            <div>
+              <div class="cc-agent-detail-name">${escapeHtml(displayName)}</div>
+              ${member.role ? `<div class="cc-agent-detail-role">${escapeHtml(member.role)}</div>` : ''}
+            </div>
+          </div>
+          <button class="cc-agent-detail-close" title="Close">&times;</button>
+        </div>
+        <div class="cc-agent-detail-tabs">
+          <button class="cc-agent-detail-tab ${activeTab === 'instruction' ? 'active' : ''}" data-detail-tab="instruction">System Instruction</button>
+          <button class="cc-agent-detail-tab ${activeTab === 'kb' ? 'active' : ''}" data-detail-tab="kb">Knowledge Base</button>
+        </div>
+        <div class="cc-agent-detail-body" id="agentDetailBody">
+          <div class="cc-loading">Loading...</div>
+        </div>
+      </div>
+    </div>
+  `;
 
-  // Load KB identity and file list
-  loadAgentIdentity(agentId);
-  loadAgentKbList(agentId);
+  document.body.insertAdjacentHTML('beforeend', panelHtml);
 
-  // Hide KB viewer if open
-  document.getElementById('agentKbViewer').style.display = 'none';
+  // Bind close
+  document.querySelector('.cc-agent-detail-close').addEventListener('click', closeAgentDetail);
+  document.getElementById('agentDetailPanel').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeAgentDetail();
+  });
+
+  // Bind tab switches
+  document.querySelectorAll('.cc-agent-detail-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.agentDetailTab = btn.dataset.detailTab;
+      document.querySelectorAll('.cc-agent-detail-tab').forEach(b => b.classList.toggle('active', b.dataset.detailTab === state.agentDetailTab));
+      loadAgentDetailContent();
+    });
+  });
+
+  loadAgentDetailContent();
 }
 
-function hideAgentDetail() {
-  document.getElementById('agentDetailPanel').style.display = 'none';
-  dom.teamGrid.style.display = '';
-}
+async function loadAgentDetailContent() {
+  const body = document.getElementById('agentDetailBody');
+  if (!body || !state.agentDetailId) return;
 
-async function loadAgentIdentity(agentId) {
-  const el = document.getElementById('agentDetailIdentity');
-  el.textContent = 'Loading...';
+  body.innerHTML = `<div class="cc-loading">Loading...</div>`;
 
-  try {
-    const data = await apiCall(`/api/kb/read?file=identity.md&agent=${encodeURIComponent(agentId)}`);
-    el.textContent = data.content || '(empty)';
-  } catch {
-    el.textContent = '(No system prompt found)';
+  if (state.agentDetailTab === 'instruction') {
+    await loadAgentInstruction(body, state.agentDetailId);
+  } else {
+    await loadAgentKbList(body, state.agentDetailId);
   }
 }
 
-async function loadAgentKbList(agentId) {
-  const el = document.getElementById('agentKbList');
-  el.innerHTML = '<div class="cc-loading">Loading KB files...</div>';
-
+async function loadAgentInstruction(container, agentId) {
   try {
-    const data = await apiCall(`/api/kb/list?agent=${encodeURIComponent(agentId)}`);
-    const files = data.files || [];
-
-    if (files.length === 0) {
-      el.innerHTML = '<div class="cc-text-muted" style="font-size: 12px;">No KB files.</div>';
+    const data = await agentApiCall('/api/kb/read?file=identity.md', agentId);
+    const content = data.content || '';
+    if (!content) {
+      container.innerHTML = `<div class="cc-agent-detail-empty">No system instruction found (identity.md).</div>`;
       return;
     }
-
-    el.innerHTML = files.map(f => `
-      <div class="cc-agent-kb-file" data-agent-id="${escapeHtml(agentId)}" data-file="${escapeHtml(f)}">
-        <span class="cc-agent-kb-file-icon">&#128196;</span>
-        <span class="cc-agent-kb-file-name">${escapeHtml(f)}</span>
-      </div>
-    `).join('');
-  } catch {
-    el.innerHTML = '<div class="cc-text-muted" style="font-size: 12px;">Unable to load KB files.</div>';
+    container.innerHTML = `<pre class="cc-agent-detail-pre">${escapeHtml(content)}</pre>`;
+  } catch (err) {
+    container.innerHTML = `<div class="cc-agent-detail-empty">Unable to load system instruction: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-async function openKbFile(agentId, filename) {
-  const viewer = document.getElementById('agentKbViewer');
-  const titleEl = document.getElementById('agentKbViewerTitle');
-  const contentEl = document.getElementById('agentKbViewerContent');
+async function loadAgentKbList(container, agentId) {
+  try {
+    const data = await agentApiCall('/api/kb/list', agentId);
+    const files = data.files || [];
+    if (files.length === 0) {
+      container.innerHTML = `<div class="cc-agent-detail-empty">No knowledge base files found.</div>`;
+      return;
+    }
+    container.innerHTML = `
+      <div class="cc-kb-file-list" id="kbFileList">
+        ${files.map(f => `
+          <div class="cc-kb-file-item" data-kb-file="${escapeHtml(f)}">
+            <span class="cc-kb-file-icon">M</span>
+            <span class="cc-kb-file-name">${escapeHtml(f)}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="cc-kb-file-content" id="kbFileContent" style="display:none;">
+        <button class="cc-kb-back-btn" id="kbBackBtn">Back to files</button>
+        <div class="cc-kb-file-title" id="kbFileTitle"></div>
+        <pre class="cc-agent-detail-pre" id="kbFileBody"></pre>
+      </div>
+    `;
 
+    // Bind file clicks
+    document.getElementById('kbFileList').addEventListener('click', (e) => {
+      const item = e.target.closest('.cc-kb-file-item');
+      if (!item) return;
+      const filename = item.dataset.kbFile;
+      if (filename) loadKbFileContent(agentId, filename);
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="cc-agent-detail-empty">Unable to load KB files: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function loadKbFileContent(agentId, filename) {
+  const fileList = document.getElementById('kbFileList');
+  const contentArea = document.getElementById('kbFileContent');
+  const titleEl = document.getElementById('kbFileTitle');
+  const bodyEl = document.getElementById('kbFileBody');
+  const backBtn = document.getElementById('kbBackBtn');
+
+  if (!fileList || !contentArea) return;
+
+  fileList.style.display = 'none';
+  contentArea.style.display = 'block';
   titleEl.textContent = filename;
-  contentEl.textContent = 'Loading...';
-  viewer.style.display = 'block';
+  bodyEl.textContent = 'Loading...';
+
+  // Bind back button
+  backBtn.onclick = () => {
+    fileList.style.display = 'flex';
+    contentArea.style.display = 'none';
+  };
 
   try {
-    const data = await apiCall(`/api/kb/read?file=${encodeURIComponent(filename)}&agent=${encodeURIComponent(agentId)}`);
-    contentEl.textContent = data.content || '(empty)';
-  } catch {
-    contentEl.textContent = '(Unable to read file)';
+    const data = await agentApiCall(`/api/kb/read?file=${encodeURIComponent(filename)}`, agentId);
+    bodyEl.textContent = data.content || '(empty)';
+  } catch (err) {
+    bodyEl.textContent = `Error: ${err.message}`;
   }
 }
 
@@ -547,8 +615,9 @@ function renderTaskCard(task) {
     `<span class="cc-board-label">${escapeHtml(label)}</span>`
   ).join('');
 
+  const threadId = task.threadId || '';
   return `
-    <div class="cc-board-card">
+    <div class="cc-board-card${threadId ? ' cc-board-card-clickable' : ''}" ${threadId ? `data-thread-id="${escapeHtml(threadId)}"` : ''}>
       <div class="cc-board-card-top">
         <span class="cc-board-card-number">${escapeHtml(task.id)}</span>
         ${priorityHtml}
@@ -669,16 +738,17 @@ function renderBoardCard(issue) {
 async function loadOpsData() {
   if (!state.selectedProjectId) return;
 
-  dom.opsGrid.innerHTML = `<div class="cc-loading">Loading workflow runs...</div>`;
+  dom.opsGrid.innerHTML = `<div class="cc-loading">Loading ops...</div>`;
 
   try {
-    const data = await apiCall('/api/actions');
-    const runs = data.workflow_runs || data.runs || data || [];
-    renderOps(runs);
-    dom.opsLastUpdated.textContent = `Updated ${timeAgo(new Date().toISOString())}`;
+    const data = await apiCall('/api/ops');
+    const runs = data.builds || data.workflow_runs || data.runs || [];
+    const pulls = data.pulls || [];
+    renderOps(runs, pulls);
+    dom.opsLastUpdated.textContent = `Updated ${timeAgo(data.lastUpdated || new Date().toISOString())}`;
   } catch (err) {
     console.error('Failed to load ops:', err);
-    renderOps([]);
+    renderOps([], []);
     dom.opsLastUpdated.textContent = 'Unable to load';
   }
 }
@@ -700,44 +770,80 @@ function opsStatusLabel(status, conclusion) {
   return status || 'Unknown';
 }
 
-function renderOps(runs) {
-  if (runs.length === 0) {
+function renderOps(runs, pulls = []) {
+  if (runs.length === 0 && pulls.length === 0) {
     dom.opsGrid.innerHTML = `
       <div class="cc-team-empty">
-        <p>No workflow runs found.</p>
+        <p>No workflow runs or pull requests found.</p>
         <p style="font-size: 12px; color: var(--cc-text-faint);">
-          GitHub Actions runs will appear here once the project is connected.
+          GitHub data will appear here once the project is connected.
         </p>
       </div>
     `;
     return;
   }
 
-  dom.opsGrid.innerHTML = runs.map(run => {
-    const name = run.name || run.workflow_name || 'Workflow';
-    const status = run.status || '';
-    const conclusion = run.conclusion || '';
-    const statusCls = opsStatusClass(status, conclusion);
-    const statusText = opsStatusLabel(status, conclusion);
-    const updatedAt = run.updated_at || run.updatedAt || run.created_at || run.createdAt;
-    const branch = run.head_branch || run.branch || '';
-    const runNumber = run.run_number || '';
+  let html = '';
 
-    return `
-      <div class="cc-ops-card">
-        <div class="cc-ops-card-header">
-          <span class="cc-ops-status-dot ${statusCls}"></span>
-          <span class="cc-ops-card-name">${escapeHtml(name)}</span>
-          ${runNumber ? `<span class="cc-ops-run-number">#${escapeHtml(String(runNumber))}</span>` : ''}
+  // CI Runs section
+  if (runs.length > 0) {
+    html += `<div class="cc-ops-section-label" style="grid-column: 1 / -1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cc-text-muted); margin-bottom: 4px;">CI Runs</div>`;
+    html += runs.map(run => {
+      const name = run.name || run.workflow_name || 'Workflow';
+      const status = run.status || '';
+      const conclusion = run.conclusion || '';
+      const statusCls = opsStatusClass(status, conclusion);
+      const statusText = opsStatusLabel(status, conclusion);
+      const updatedAt = run.updated_at || run.updatedAt || run.created_at || run.createdAt;
+      const branch = run.head_branch || run.branch || '';
+      const runNumber = run.run_number || '';
+
+      return `
+        <div class="cc-ops-card">
+          <div class="cc-ops-card-header">
+            <span class="cc-ops-status-dot ${statusCls}"></span>
+            <span class="cc-ops-card-name">${escapeHtml(name)}</span>
+            ${runNumber ? `<span class="cc-ops-run-number">#${escapeHtml(String(runNumber))}</span>` : ''}
+          </div>
+          <div class="cc-ops-card-status ${statusCls}">${escapeHtml(statusText)}</div>
+          <div class="cc-ops-card-meta">
+            ${branch ? `<span class="cc-ops-card-branch">${escapeHtml(branch)}</span>` : ''}
+            ${updatedAt ? `<span class="cc-ops-card-time">${timeAgo(updatedAt)}</span>` : ''}
+          </div>
         </div>
-        <div class="cc-ops-card-status ${statusCls}">${escapeHtml(statusText)}</div>
-        <div class="cc-ops-card-meta">
-          ${branch ? `<span class="cc-ops-card-branch">${escapeHtml(branch)}</span>` : ''}
-          ${updatedAt ? `<span class="cc-ops-card-time">${timeAgo(updatedAt)}</span>` : ''}
+      `;
+    }).join('');
+  }
+
+  // Pull Requests section
+  if (pulls.length > 0) {
+    html += `<div class="cc-ops-section-label" style="grid-column: 1 / -1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cc-text-muted); margin: 12px 0 4px;">Pull Requests</div>`;
+    html += pulls.map(pr => {
+      const number = pr.number || '';
+      const title = pr.title || 'Untitled PR';
+      const author = pr.author || pr.user?.login || '';
+      const reviewRequests = pr.reviewRequests || pr.requested_reviewers || [];
+      const createdAt = pr.createdAt || pr.created_at;
+      const age = createdAt ? timeAgo(createdAt) : '';
+
+      return `
+        <div class="cc-ops-card">
+          <div class="cc-ops-card-header">
+            <span class="cc-ops-status-dot cc-status-pending"></span>
+            <span class="cc-ops-card-name">${escapeHtml(title)}</span>
+            <span class="cc-ops-run-number">#${escapeHtml(String(number))}</span>
+          </div>
+          <div class="cc-ops-card-meta">
+            ${author ? `<span class="cc-ops-card-branch">${escapeHtml(author)}</span>` : ''}
+            ${reviewRequests.length > 0 ? `<span style="color: var(--cc-text-faint);">Review: ${reviewRequests.map(r => escapeHtml(typeof r === 'string' ? r : r.login || '')).join(', ')}</span>` : ''}
+            ${age ? `<span class="cc-ops-card-time">${age}</span>` : ''}
+          </div>
         </div>
-      </div>
-    `;
-  }).join('');
+      `;
+    }).join('');
+  }
+
+  dom.opsGrid.innerHTML = html;
 }
 
 // ── Metrics Tab ─────────────────────────────────────────────────
@@ -751,34 +857,27 @@ async function loadMetricsData() {
   metricsGrid.innerHTML = `<div class="cc-loading">Loading metrics...</div>`;
 
   try {
-    // Fetch board and threads data to compute metrics
-    const [boardData, threadsData] = await Promise.allSettled([
-      apiCall('/api/board'),
+    const [taskData, threadsData] = await Promise.allSettled([
+      apiCall('/api/tasks'),
       apiCall('/api/threads?limit=200'),
     ]);
 
-    const board = boardData.status === 'fulfilled' ? boardData.value : null;
+    const tasks = taskData.status === 'fulfilled' ? (taskData.value.tasks || []) : [];
     const threads = threadsData.status === 'fulfilled' ? (threadsData.value.threads || []) : [];
 
-    // Compute metrics from board data
-    const columns = board?.columns || [];
-    const totalIssues = columns.reduce((sum, c) => sum + (c.issues?.length || 0), 0);
-    const openIssues = columns.filter(c => c.id !== 'done').reduce((sum, c) => sum + (c.issues?.length || 0), 0);
-    const doneIssues = columns.find(c => c.id === 'done')?.issues?.length || 0;
-    const inProgressIssues = columns.find(c => c.id === 'in-progress')?.issues?.length || 0;
-    const inReviewIssues = columns.find(c => c.id === 'in-review')?.issues?.length || 0;
+    // Count tasks by state
+    const stateCounts = {};
+    tasks.forEach(t => {
+      stateCounts[t.state] = (stateCounts[t.state] || 0) + 1;
+    });
 
     const metrics = [
-      { label: 'Total Issues', value: totalIssues, color: 'var(--cc-accent)' },
-      { label: 'Open', value: openIssues, color: 'var(--cc-green)' },
-      { label: 'In Progress', value: inProgressIssues, color: '#d29922' },
-      { label: 'In Review', value: inReviewIssues, color: 'var(--cc-accent)' },
-      { label: 'Done', value: doneIssues, color: 'var(--cc-text-muted)' },
-      { label: 'Active Threads (7d)', value: threads.filter(t => {
-        if (!t.updatedAt) return false;
-        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        return new Date(t.updatedAt).getTime() > sevenDaysAgo;
-      }).length, color: 'var(--cc-accent)' },
+      { label: 'Total Tasks', value: tasks.length, color: 'var(--cc-accent)' },
+      { label: 'In Progress', value: (stateCounts['in_progress'] || 0) + (stateCounts['assigned'] || 0), color: '#d29922' },
+      { label: 'In Review', value: (stateCounts['in_review'] || 0) + (stateCounts['qa'] || 0), color: 'var(--cc-accent)' },
+      { label: 'Blocked', value: stateCounts['blocked'] || 0, color: '#f85149' },
+      { label: 'Done', value: stateCounts['done'] || 0, color: 'var(--cc-green)' },
+      { label: 'Active Threads', value: threads.filter(t => t.status === 'active').length, color: 'var(--cc-text-muted)' },
     ];
 
     metricsGrid.innerHTML = metrics.map(m => `
@@ -805,8 +904,27 @@ async function loadThreadsData() {
   threadList.innerHTML = `<div class="cc-loading">Loading threads...</div>`;
 
   try {
-    const data = await apiCall('/api/threads?limit=50');
+    const [threadsResult, tasksResult] = await Promise.allSettled([
+      apiCall('/api/threads?limit=50'),
+      apiCall('/api/tasks'),
+    ]);
+    const data = threadsResult.status === 'fulfilled' ? threadsResult.value : {};
     const threads = data.threads || data || [];
+    const tasksData = tasksResult.status === 'fulfilled' ? tasksResult.value : {};
+    const tasks = tasksData.tasks || [];
+
+    // Build task-by-threadId lookup
+    state.tasksByThreadId = {};
+    tasks.forEach(t => {
+      if (t.threadId) state.tasksByThreadId[t.threadId] = t;
+    });
+
+    // Pin main thread to top, rest sorted by updatedAt (API default)
+    threads.sort((a, b) => {
+      if (a.id === 'main') return -1;
+      if (b.id === 'main') return 1;
+      return 0;
+    });
     state.threads = threads;
     threadCount.textContent = `${threads.length} thread${threads.length !== 1 ? 's' : ''}`;
 
@@ -839,24 +957,85 @@ async function loadThreadsData() {
   }
 }
 
+function formatParticipants(participants) {
+  if (!participants || participants.length === 0) return '';
+  return participants.map(p => escapeHtml(p.participantId)).join(', ');
+}
+
+function taskStateBadge(task) {
+  if (!task) return '';
+  const stateLabels = {
+    created: 'created', assigned: 'assigned', in_progress: 'in progress',
+    in_review: 'in review', qa: 'QA', blocked: 'blocked',
+    done: 'done', cancelled: 'cancelled',
+  };
+  const stateClasses = {
+    created: 'grey', assigned: 'grey', in_progress: 'blue',
+    in_review: 'yellow', qa: 'yellow', blocked: 'red',
+    done: 'green', cancelled: 'grey',
+  };
+  const label = stateLabels[task.state] || task.state;
+  const cls = stateClasses[task.state] || 'grey';
+  return `<span class="cc-task-badge cc-task-badge-${escapeHtml(cls)}">${escapeHtml(label)}</span>`;
+}
+
+function renderThreadCard(thread) {
+  const title = thread.title || thread.id;
+  const isSelected = thread.id === state.activeThreadId;
+  const isActive = thread.status === 'active';
+  const isPinned = thread.id === 'main';
+  const updated = thread.updatedAt ? timeAgo(thread.updatedAt) : '';
+  const participantNames = formatParticipants(thread.participants);
+  const task = state.tasksByThreadId[thread.id];
+
+  return `
+    <div class="cc-thread-card ${isSelected ? 'cc-thread-selected' : ''} ${isActive ? '' : 'cc-thread-inactive'} ${isPinned ? 'cc-thread-pinned' : ''}" data-thread-id="${escapeHtml(thread.id)}">
+      <div class="cc-thread-card-header">
+        <span class="cc-thread-icon">${isPinned ? '=' : '#'}</span>
+        <span class="cc-thread-title">${escapeHtml(title)}</span>
+        ${taskStateBadge(task)}
+      </div>
+      <div class="cc-thread-card-meta">
+        ${participantNames ? `<span class="cc-thread-participants">${participantNames}</span>` : ''}
+        ${updated ? `<span>${updated}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
 function renderThreadSidebar(threads) {
   const threadList = document.getElementById('threadList');
-  threadList.innerHTML = threads.map(thread => {
-    const title = thread.title || thread.id;
-    const isSelected = thread.id === state.activeThreadId;
-    const isActive = thread.status === 'active';
-    const updated = thread.updatedAt ? timeAgo(thread.updatedAt) : '';
+  const completedStates = new Set(['done', 'cancelled']);
 
-    return `
-      <div class="cc-thread-card ${isSelected ? 'cc-thread-selected' : ''} ${isActive ? '' : 'cc-thread-inactive'}" data-thread-id="${escapeHtml(thread.id)}">
-        <div class="cc-thread-card-header">
-          <span class="cc-thread-icon">#</span>
-          <span class="cc-thread-title">${escapeHtml(title)}</span>
+  const activeThreads = [];
+  const completedThreads = [];
+
+  threads.forEach(thread => {
+    const task = state.tasksByThreadId[thread.id];
+    if (task && completedStates.has(task.state) && thread.id !== 'main') {
+      completedThreads.push(thread);
+    } else {
+      activeThreads.push(thread);
+    }
+  });
+
+  let html = activeThreads.map(renderThreadCard).join('');
+
+  if (completedThreads.length > 0) {
+    html += `
+      <div class="cc-thread-fold">
+        <div class="cc-thread-fold-header" onclick="this.parentElement.classList.toggle('cc-thread-fold-open')">
+          <span class="cc-thread-fold-chevron"></span>
+          <span>Completed (${completedThreads.length})</span>
         </div>
-        ${updated ? `<div class="cc-thread-card-meta"><span>${updated}</span></div>` : ''}
+        <div class="cc-thread-fold-body">
+          ${completedThreads.map(renderThreadCard).join('')}
+        </div>
       </div>
     `;
-  }).join('');
+  }
+
+  threadList.innerHTML = html;
 }
 
 function showChatEmptyState() {
@@ -866,16 +1045,21 @@ function showChatEmptyState() {
   document.getElementById('chatInputBar').style.display = 'none';
 }
 
-function showChatArea(title) {
+function showChatArea(title, participants) {
   document.getElementById('chatEmptyState').style.display = 'none';
   document.getElementById('chatHeader').style.display = 'flex';
   document.getElementById('chatMessages').style.display = 'flex';
   document.getElementById('chatInputBar').style.display = 'flex';
   document.getElementById('chatThreadTitle').textContent = title || '';
+  const participantsEl = document.getElementById('chatThreadParticipants');
+  if (participantsEl) {
+    participantsEl.textContent = participants ? participants : '';
+  }
 }
 
 async function selectThread(threadId) {
   state.activeThreadId = threadId;
+  localStorage.setItem('cc-activeThreadId', threadId);
 
   // Update sidebar highlights
   renderThreadSidebar(state.threads);
@@ -883,8 +1067,9 @@ async function selectThread(threadId) {
   // Find thread info
   const thread = state.threads.find(t => t.id === threadId);
   const title = thread ? (thread.title || thread.id) : threadId;
+  const participantNames = thread ? formatParticipants(thread.participants) : '';
 
-  showChatArea(title);
+  showChatArea(title, participantNames);
   await loadChatMessages(threadId);
 }
 
@@ -920,17 +1105,28 @@ function renderChatMessages(messages) {
 
 function renderChatBubble(msg) {
   const role = msg.role || 'user';
+  const kind = msg.kind || 'message';
+  const isSystem = kind === 'system';
   const isAssistant = role === 'assistant';
   const senderName = msg.sender || msg.assistantName || (isAssistant ? 'Captain' : 'You');
-  const text = msg.text || msg.content || '';
+  const text = msg.text || msg.fullText || msg.content || '';
   const time = msg.createdAt || msg.timestamp;
   const timeStr = time ? formatMessageTime(time) : '';
-  const bubbleClass = isAssistant ? 'cc-message-assistant' : 'cc-message-user';
 
+  if (isSystem) {
+    return `
+      <div class="cc-message cc-message-system">
+        <div class="cc-message-text">${escapeHtml(text)}</div>
+        ${timeStr ? `<div class="cc-message-time">${escapeHtml(timeStr)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  const bubbleClass = isAssistant ? 'cc-message-assistant' : 'cc-message-user';
   return `
     <div class="cc-message ${bubbleClass}">
       <div class="cc-message-sender">${escapeHtml(senderName)}</div>
-      <div class="cc-message-text">${escapeHtml(text)}</div>
+      <div class="cc-message-text cc-markdown">${renderMarkdown(text)}</div>
       ${timeStr ? `<div class="cc-message-time">${escapeHtml(timeStr)}</div>` : ''}
     </div>
   `;
@@ -965,12 +1161,41 @@ function appendChatMessage(msg) {
   scrollChatToBottom();
 }
 
+function updateOrAppendStreamingMessage(msg) {
+  const chatMessages = document.getElementById('chatMessages');
+  const streamingBubble = chatMessages.querySelector('.cc-message-streaming');
+
+  if (streamingBubble) {
+    const textEl = streamingBubble.querySelector('.cc-message-text');
+    if (textEl) textEl.innerHTML = renderMarkdown(msg.text || msg.fullText || msg.content || '');
+    scrollChatToBottom();
+  } else {
+    const noMsgs = chatMessages.querySelector('.cc-chat-no-messages');
+    if (noMsgs) noMsgs.remove();
+
+    const senderName = msg.sender?.id || msg.sender || 'Captain';
+    const text = msg.text || msg.fullText || msg.content || '';
+    const bubbleHtml = `
+      <div class="cc-message cc-message-assistant cc-message-streaming">
+        <div class="cc-message-sender">${escapeHtml(senderName)}</div>
+        <div class="cc-message-text cc-markdown">${renderMarkdown(text)}</div>
+        <div class="cc-message-time" style="font-style: italic; opacity: 0.6;">streaming...</div>
+      </div>
+    `;
+    const div = document.createElement('div');
+    div.innerHTML = bubbleHtml;
+    chatMessages.appendChild(div.firstElementChild);
+    scrollChatToBottom();
+  }
+}
+
 async function sendChatMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if (!text || !state.activeThreadId) return;
 
   input.value = '';
+  input.style.height = 'auto';
 
   // Optimistic append
   appendChatMessage({
@@ -981,10 +1206,10 @@ async function sendChatMessage() {
   });
 
   try {
-    await apiPost('/api/harness/message/send', {
+    await apiPost('/api/message', {
       thread_id: state.activeThreadId,
       text: text,
-      channel: 'webui',
+      assistantId: 'captain',
     });
   } catch (err) {
     console.error('Failed to send message:', err);
@@ -1005,7 +1230,11 @@ async function createNewThread() {
   try {
     const result = await apiPost('/api/threads', {
       title: title,
-      participants: ['captain', 'ning'],
+      assistantId: 'captain',
+      participants: [
+        { participantType: 'assistant', participantId: 'captain' },
+        { participantType: 'user', participantId: 'ning' },
+      ],
     });
     const newThread = result.thread || result;
     // Reload thread list and select the new thread
@@ -1092,18 +1321,69 @@ function handleSSEEvent(event) {
       }
       break;
 
-    case 'message_created':
-    case 'new_message': {
+    case 'thread_message': {
+      // Unified persisted message event — all messages come through cc msg send
       const msg = event.payload || event;
       const msgThreadId = msg.threadId || msg.thread_id;
       if (msgThreadId && msgThreadId === state.activeThreadId && state.activeTab === 'threads') {
-        // Only append assistant messages (user messages are optimistically added)
-        if (msg.role === 'assistant') {
-          appendChatMessage(msg);
-        }
+        const senderType = msg.sender?.type || (msg.role === 'assistant' ? 'assistant' : 'user');
+        const senderId = msg.sender?.id || msg.senderName || '';
+        // Don't duplicate user messages we optimistically appended from this UI
+        if (senderType === 'user' && msg.source === 'webui') break;
+        appendChatMessage({
+          role: senderType === 'user' ? 'user' : 'assistant',
+          kind: msg.kind || 'message',
+          sender: senderId === 'system' ? 'System' : senderId,
+          content: msg.content,
+          createdAt: msg.createdAt,
+        });
       }
       break;
     }
+
+    case 'ui_message_sent': {
+      // Legacy — kept for backwards compat, no-op (thread_message handles it)
+      break;
+    }
+
+    case 'outbound_message':
+    case 'assistant_text': {
+      // Agent raw output — captain bar preview only, not rendered in threads.
+      // Agents post to threads via cc msg send → thread_message events.
+      const msg = event.payload || event;
+      const text = msg.text || msg.content || '';
+      if (text) {
+        const agentName = msg.agentId || 'Captain';
+        const preview = text.length > 120 ? text.slice(0, 120) + '...' : text;
+        updateCaptainBar(`[${agentName}] ${preview}`);
+      }
+      break;
+    }
+
+    case 'claude_result': {
+      // Turn complete — metadata only
+      break;
+    }
+
+    case 'task_created':
+    case 'task_updated':
+    case 'task_completed':
+      if (state.activeTab === 'board' || state.activeTab === 'metrics') {
+        loadTabData(state.activeTab);
+      }
+      // Tasks auto-create threads, so refresh thread list when on threads tab
+      if (state.activeTab === 'threads') {
+        loadThreadsData();
+      }
+      break;
+
+    case 'agent_created':
+    case 'agent_updated':
+    case 'agent_archived':
+      if (state.activeTab === 'team') {
+        loadTeamData();
+      }
+      break;
 
     default:
       break;
@@ -1134,9 +1414,15 @@ document.getElementById('newProjectModal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeNewProjectModal();
 });
 
-// Close modal on Escape key
+// Close modal/panel on Escape key
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeNewProjectModal();
+  if (e.key === 'Escape') {
+    if (state.agentDetailId) {
+      closeAgentDetail();
+    } else {
+      closeNewProjectModal();
+    }
+  }
 });
 
 document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
@@ -1185,49 +1471,11 @@ document.getElementById('newProjectForm').addEventListener('submit', async (e) =
 
 // ── Event Listeners ──────────────────────────────────────────────
 
-// Team card click — open agent detail
-dom.teamGrid.addEventListener('click', (e) => {
-  const card = e.target.closest('.cc-team-card-clickable');
-  if (!card) return;
-  const agentId = card.dataset.agentId;
-  if (agentId) showAgentDetail(agentId);
-});
-
-// Agent detail back button
-document.getElementById('agentDetailBack').addEventListener('click', hideAgentDetail);
-
-// KB file list click — open file viewer
-document.getElementById('agentKbList').addEventListener('click', (e) => {
-  const fileEl = e.target.closest('.cc-agent-kb-file');
-  if (!fileEl) return;
-  const agentId = fileEl.dataset.agentId;
-  const filename = fileEl.dataset.file;
-  if (agentId && filename) openKbFile(agentId, filename);
-});
-
-// KB viewer close button
-document.getElementById('agentKbViewerClose').addEventListener('click', () => {
-  document.getElementById('agentKbViewer').style.display = 'none';
-});
-
-// Project switcher dropdown toggle
-dom.projectSwitcherBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  toggleProjectDropdown();
-});
-
-// Project selection from dropdown
-dom.projectDropdownList.addEventListener('click', (e) => {
-  const item = e.target.closest('.cc-project-dropdown-item');
-  if (!item) return;
-  const projectId = item.dataset.projectId;
-  if (projectId) selectProject(projectId);
-});
-
-// Close dropdown when clicking outside
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.cc-project-switcher')) {
-    closeProjectDropdown();
+// Project selection via header dropdown
+dom.projectSelect.addEventListener('change', () => {
+  const projectId = dom.projectSelect.value;
+  if (projectId) {
+    selectProject(projectId);
   }
 });
 
@@ -1236,6 +1484,16 @@ dom.navTabs.forEach(btn => {
   btn.addEventListener('click', () => {
     showTab(btn.dataset.tab);
   });
+});
+
+// Team card click — open agent detail panel
+dom.teamGrid.addEventListener('click', (e) => {
+  const card = e.target.closest('.cc-team-card-clickable');
+  if (!card) return;
+  const agentId = card.dataset.agentId;
+  if (agentId) {
+    openAgentDetail(agentId);
+  }
 });
 
 // Thread sidebar click — select a thread
@@ -1253,17 +1511,33 @@ document.getElementById('chatSendBtn').addEventListener('click', () => {
   sendChatMessage();
 });
 
-// Chat input — Enter to send
-document.getElementById('chatInput').addEventListener('keydown', (e) => {
+// Chat input — Enter to send, Shift+Enter for new line
+const chatInput = document.getElementById('chatInput');
+chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendChatMessage();
   }
 });
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+});
 
 // New thread button
 document.getElementById('newThreadBtn').addEventListener('click', () => {
   createNewThread();
+});
+
+// Board card click — navigate to task thread
+document.getElementById('boardColumns').addEventListener('click', (e) => {
+  const card = e.target.closest('.cc-board-card[data-thread-id]');
+  if (!card) return;
+  const threadId = card.dataset.threadId;
+  if (threadId) {
+    showTab('threads');
+    selectThread(threadId);
+  }
 });
 
 // Header button handlers
@@ -1272,9 +1546,9 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
 });
 
 document.getElementById('chatBtn').addEventListener('click', () => {
-  const project = state.projects.find(p => p.id === state.selectedProjectId);
-  const projectPort = project ? project.port : 3100;
-  window.open(`http://localhost:${projectPort}`, '_blank');
+  if (state.selectedProjectId) {
+    showTab('threads');
+  }
 });
 
 // Keyboard shortcuts
@@ -1293,5 +1567,15 @@ document.addEventListener('keydown', (e) => {
 // ── Initialization ───────────────────────────────────────────────
 
 (async function init() {
+  // Restore tab and thread from localStorage before loading projects
+  const savedTab = localStorage.getItem('cc-activeTab');
+  if (savedTab && ['team', 'board', 'ops', 'threads', 'metrics'].includes(savedTab)) {
+    state.activeTab = savedTab;
+  }
+  const savedThreadId = localStorage.getItem('cc-activeThreadId');
+  if (savedThreadId) {
+    state.activeThreadId = savedThreadId;
+  }
+
   await loadProjects();
 })();
