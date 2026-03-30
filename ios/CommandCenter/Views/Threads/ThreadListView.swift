@@ -36,22 +36,15 @@ struct ThreadListView: View {
                     ContentUnavailableView("No Threads", systemImage: "bubble.left.and.bubble.right",
                         description: Text("Threads will appear here when agents start working."))
                 } else {
-                    List {
-                        // Active threads
-                        ForEach(activeThreads) { thread in
-                            threadRow(thread)
-                        }
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            // Active threads
+                            ForEach(activeThreads) { thread in
+                                threadRow(thread)
+                            }
 
-                        // Completed section
-                        if !completedThreads.isEmpty {
-                            Section {
-                                if showCompleted {
-                                    ForEach(completedThreads) { thread in
-                                        threadRow(thread)
-                                            .opacity(0.6)
-                                    }
-                                }
-                            } header: {
+                            // Completed section
+                            if !completedThreads.isEmpty {
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         showCompleted.toggle()
@@ -62,20 +55,29 @@ struct ThreadListView: View {
                                             .font(.caption2.weight(.semibold))
                                         Text("Completed (\(completedThreads.count))")
                                             .font(.subheadline.weight(.medium))
+                                        Spacer()
                                     }
                                     .foregroundStyle(.secondary)
-                                    .textCase(nil)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                }
+
+                                if showCompleted {
+                                    ForEach(completedThreads) { thread in
+                                        threadRow(thread)
+                                            .opacity(0.6)
+                                    }
                                 }
                             }
                         }
                     }
-                    .listStyle(.plain)
                     .refreshable {
                         await threadStore.loadThreads()
                         await boardStore.loadTasks()
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Threads")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -123,7 +125,11 @@ struct ThreadListView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { navigationPath.append(thread) }
-            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .overlay(alignment: .bottom) {
+                Divider().padding(.leading, 16)
+            }
     }
 }
 
@@ -152,6 +158,5 @@ struct ThreadRowView: View {
                     .lineLimit(2)
             }
         }
-        .padding(.vertical, 2)
     }
 }
