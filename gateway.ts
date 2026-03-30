@@ -12,6 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { URL } from "node:url";
+import { randomUUID } from "node:crypto";
 import { exec, execFileSync } from "node:child_process";
 import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
@@ -542,6 +543,28 @@ export class Gateway {
         const kb = this.resolveKb(projectId, agentId);
         if (!kb) { this.sendJson(res, 404, { error: `No KB for ${projectId}/${agentId}` }); return; }
         await this.handleKbRequest(method, pathname, req, res, kb);
+        return;
+      }
+
+      // --- Image upload endpoint ---
+      if (method === "POST" && pathname === "/api/message/image") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        await this.handleImageUpload(req, res, parsed, projectId);
+        return;
+      }
+
+      // --- Media serving endpoint ---
+      if (method === "GET" && pathname === "/api/harness/media") {
+        const filePath = parsed.searchParams.get("path");
+        if (!filePath) { this.sendJson(res, 400, { error: "path query parameter is required" }); return; }
+        this.handleMediaServe(res, filePath);
+        return;
+      }
+
+      // --- Voice transcription proxy ---
+      if (method === "POST" && pathname === "/api/harness/voice/transcribe") {
+        await this.handleVoiceTranscribe(req, res);
         return;
       }
 
@@ -1447,6 +1470,222 @@ export class Gateway {
     } catch (err) {
       this.sendJson(res, 500, { error: `Execution failed: ${(err as Error).message}` });
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Image upload                                                      */
+  /* ---------------------------------------------------------------- */
+
+  private async handleImageUpload(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    parsed: URL,
+    projectId: string,
+  ): Promise<void> {
+    const parts = await this.parseMultipart(req);
+    if (!parts.length) {
+      this.sendJson(res, 400, { error: "No file uploaded. Send multipart/form-data with an image field." });
+      return;
+    }
+
+    const uploadsDir = path.join(this.dataDir, "uploads");
+    fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const savedPaths: string[] = [];
+    for (const part of parts) {
+      if (!part.data.length) continue;
+      // Derive extension from filename or content-type
+      let ext = ".bin";
+      if (part.filename) {
+        const dotIdx = part.filename.lastIndexOf(".");
+        if (dotIdx >= 0) ext = part.filename.slice(dotIdx);
+      } else if (part.contentType) {
+        const sub = part.contentType.split("/")[1]?.split(";")[0];
+        if (sub) ext = `.${sub}`;
+      }
+      const uuid = randomUUID();
+      const filename = `${uuid}${ext}`;
+      fs.writeFileSync(path.join(uploadsDir, filename), part.data);
+      savedPaths.push(`uploads/${filename}`);
+    }
+
+    if (!savedPaths.length) {
+      this.sendJson(res, 400, { error: "No valid file data received." });
+      return;
+    }
+
+    // Post a message with image paths in metadata if thread_id provided
+    const threadId = parsed.searchParams.get("thread_id") ?? parsed.searchParams.get("threadId") ?? undefined;
+    if (threadId) {
+      const sender = req.headers["x-user-id"] as string | undefined;
+      this.dispatchMessage({
+        projectId,
+        threadId,
+        sender: { id: sender ?? "user", type: "user" },
+        channel: "thread",
+        mode: "text",
+        content: `[image: ${savedPaths.join(", ")}]`,
+        source: "upload",
+        metadata: { imagePaths: savedPaths },
+      });
+    }
+
+    this.sendJson(res, 200, { paths: savedPaths });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Media serving                                                     */
+  /* ---------------------------------------------------------------- */
+
+  private handleMediaServe(res: http.ServerResponse, filePath: string): void {
+    // Normalize and prevent directory traversal
+    const resolved = path.resolve(this.dataDir, filePath);
+    if (!resolved.startsWith(this.dataDir)) {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
+
+    try {
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile()) {
+        this.sendJson(res, 404, { error: "Not found" });
+        return;
+      }
+    } catch {
+      this.sendJson(res, 404, { error: "Not found" });
+      return;
+    }
+
+    const ext = path.extname(resolved);
+    const mediaMime: Record<string, string> = {
+      ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+      ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+      ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
+      ".mp4": "video/mp4", ".webm": "video/webm",
+    };
+    const contentType = mediaMime[ext.toLowerCase()] ?? "application/octet-stream";
+    res.writeHead(200, { "Content-Type": contentType });
+    fs.createReadStream(resolved).pipe(res);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Voice transcription proxy                                         */
+  /* ---------------------------------------------------------------- */
+
+  private async handleVoiceTranscribe(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    // Read the raw body and forward to Whisper service
+    const rawBody = await this.readRawBody(req);
+    const contentType = req.headers["content-type"] ?? "application/octet-stream";
+
+    const whisperPort = Number(process.env.WHISPER_PORT ?? 8787);
+
+    try {
+      const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const proxyReq = http.request(
+          {
+            hostname: "127.0.0.1",
+            port: whisperPort,
+            path: "/transcribe",
+            method: "POST",
+            headers: {
+              "Content-Type": contentType,
+              "Content-Length": rawBody.length,
+            },
+          },
+          (proxyRes) => {
+            let data = "";
+            proxyRes.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+            proxyRes.on("end", () => {
+              resolve({ status: proxyRes.statusCode ?? 502, body: data });
+            });
+          },
+        );
+        proxyReq.on("error", (err) => reject(err));
+        proxyReq.write(rawBody);
+        proxyReq.end();
+      });
+
+      // Forward the Whisper response as-is
+      try {
+        const parsed = JSON.parse(result.body);
+        this.sendJson(res, result.status, parsed);
+      } catch {
+        res.writeHead(result.status, { "Content-Type": "text/plain" });
+        res.end(result.body);
+      }
+    } catch (err) {
+      this.sendJson(res, 502, { error: `Whisper service unreachable at port ${whisperPort}: ${(err as Error).message}` });
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Multipart / raw body parsing                                      */
+  /* ---------------------------------------------------------------- */
+
+  private async readRawBody(req: http.IncomingMessage): Promise<Buffer> {
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+      req.on("end", () => { resolve(Buffer.concat(chunks)); });
+    });
+  }
+
+  private async parseMultipart(req: http.IncomingMessage): Promise<{ fieldName: string; filename?: string; contentType?: string; data: Buffer }[]> {
+    const contentType = req.headers["content-type"] ?? "";
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;\s]+))/);
+    if (!boundaryMatch) return [];
+    const boundary = boundaryMatch[1] ?? boundaryMatch[2];
+
+    const rawBody = await this.readRawBody(req);
+    const delimiter = Buffer.from(`--${boundary}`);
+    const results: { fieldName: string; filename?: string; contentType?: string; data: Buffer }[] = [];
+
+    // Split on boundary
+    let start = 0;
+    const positions: number[] = [];
+    while (true) {
+      const idx = rawBody.indexOf(delimiter, start);
+      if (idx === -1) break;
+      positions.push(idx);
+      start = idx + delimiter.length;
+    }
+
+    for (let i = 0; i < positions.length - 1; i++) {
+      const partStart = positions[i] + delimiter.length;
+      const partEnd = positions[i + 1];
+      const part = rawBody.subarray(partStart, partEnd);
+
+      // Find headers/body separator (CRLFCRLF)
+      const headerEnd = part.indexOf("\r\n\r\n");
+      if (headerEnd === -1) continue;
+
+      const headerStr = part.subarray(0, headerEnd).toString();
+      // Strip trailing CRLF from body (before next boundary)
+      let bodyData = part.subarray(headerEnd + 4);
+      if (bodyData.length >= 2 && bodyData[bodyData.length - 2] === 0x0d && bodyData[bodyData.length - 1] === 0x0a) {
+        bodyData = bodyData.subarray(0, bodyData.length - 2);
+      }
+
+      // Parse headers
+      const nameMatch = headerStr.match(/name="([^"]+)"/);
+      const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+      const ctMatch = headerStr.match(/Content-Type:\s*(.+)/i);
+
+      if (nameMatch) {
+        results.push({
+          fieldName: nameMatch[1],
+          filename: filenameMatch?.[1],
+          contentType: ctMatch?.[1]?.trim(),
+          data: bodyData,
+        });
+      }
+    }
+
+    return results;
   }
 
   private async readBody(req: http.IncomingMessage): Promise<Record<string, any>> {
