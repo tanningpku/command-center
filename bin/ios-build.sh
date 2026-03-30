@@ -5,7 +5,7 @@ set -euo pipefail
 
 # ── Defaults ────────────────────────────────────────────────────────
 SSH_HOST="${IOS_BUILD_HOST:-ntan@192.168.86.28}"
-REPO_DIR="${IOS_BUILD_REPO:-~/code/command-center}"
+REPO_DIR="${IOS_BUILD_REPO:-\$HOME/code/command-center}"
 DO_PULL=true
 VERBOSE=false
 
@@ -49,7 +49,7 @@ echo "CCBUILD_STEP: xcodebuild"
 BUILD_OUTPUT=$(xcodebuild \
   -project CommandCenter.xcodeproj \
   -scheme CommandCenter \
-  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   build 2>&1) || true
 
 echo "$BUILD_OUTPUT"

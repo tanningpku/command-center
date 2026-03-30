@@ -2156,8 +2156,21 @@ async function startApp() {
   await loadProjects();
 }
 
-(function init() {
-  // Check if we already have a token
+(async function init() {
+  // Check if server requires auth
+  try {
+    const res = await fetch('/api/auth/check');
+    const data = await res.json();
+    if (!data.authEnabled) {
+      // No password set — skip login entirely
+      hideLoginScreen();
+      startApp();
+      return;
+    }
+  } catch (e) {
+    // If check fails, fall through to token check
+  }
+  // Auth is enabled — check for existing token
   if (getAuthToken()) {
     hideLoginScreen();
     startApp();

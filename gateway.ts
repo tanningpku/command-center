@@ -1544,7 +1544,10 @@ export class Gateway {
   private streamFile(filePath: string, res: http.ServerResponse): void {
     const ext = path.extname(filePath);
     const contentType = MIME[ext] ?? "application/octet-stream";
-    res.writeHead(200, { "Content-Type": contentType });
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+    });
     fs.createReadStream(filePath).pipe(res);
   }
 
