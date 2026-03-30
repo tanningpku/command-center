@@ -1,11 +1,19 @@
 import SwiftUI
 
+/// Last message preview for a thread row.
+struct ThreadPreview {
+    let sender: String
+    let content: String
+    let time: String
+}
+
 /// Manages thread list, active thread messages, SSE event handling, and optimistic sends.
 @MainActor
 @Observable
 class ThreadStore {
     var threads: [CCThread] = []
     var messages: [CCMessage] = []
+    var threadPreviews: [String: ThreadPreview] = [:]
     var activeThreadId: String?
     var isLoadingThreads = false
     var isLoadingMessages = false
@@ -55,6 +63,28 @@ class ThreadStore {
             self.error = error.localizedDescription
         }
         isLoadingThreads = false
+    }
+
+    /// Load last-message preview for each thread (fire-and-forget, non-blocking).
+    func loadPreviews() async {
+        await withTaskGroup(of: (String, ThreadPreview?).self) { group in
+            for thread in threads {
+                group.addTask { [api] in
+                    do {
+                        let response = try await api.fetchMessages(threadId: thread.id, limit: 1)
+                        if let msg = response.messages.first {
+                            return (thread.id, ThreadPreview(sender: msg.displaySender, content: msg.content, time: msg.displayTime))
+                        }
+                    } catch {}
+                    return (thread.id, nil)
+                }
+            }
+            for await (threadId, preview) in group {
+                if let preview {
+                    threadPreviews[threadId] = preview
+                }
+            }
+        }
     }
 
     func createThread(title: String, participants: [[String: String]] = []) async throws -> CCThread {

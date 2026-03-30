@@ -89,6 +89,7 @@ struct ThreadListView: View {
                     .refreshable {
                         HapticManager.light()
                         await threadStore.loadThreads()
+                        await threadStore.loadPreviews()
                         await boardStore.loadTasks()
                     }
                 }
@@ -122,6 +123,7 @@ struct ThreadListView: View {
             }
             .task {
                 await threadStore.loadThreads()
+                await threadStore.loadPreviews()
                 await boardStore.loadTasks()
             }
             .onChange(of: router.pendingThreadId) { _, newId in
@@ -149,7 +151,7 @@ struct ThreadListView: View {
     }
 
     private func threadRow(_ thread: CCThread) -> some View {
-        ThreadRowView(thread: thread)
+        ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { navigationPath.append(thread) }
@@ -161,9 +163,10 @@ struct ThreadListView: View {
     }
 }
 
-/// Single thread row in the list.
+/// Single thread row in the list with optional last-message preview.
 struct ThreadRowView: View {
     let thread: CCThread
+    var preview: ThreadPreview?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -179,7 +182,19 @@ struct ThreadRowView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
-            if let summary = thread.summary, !summary.isEmpty {
+            if let preview {
+                HStack(alignment: .top, spacing: 4) {
+                    Text(preview.sender + ":")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Text(preview.content.replacingOccurrences(of: "\n", with: " "))
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+            } else if let summary = thread.summary, !summary.isEmpty {
                 Text(summary)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
