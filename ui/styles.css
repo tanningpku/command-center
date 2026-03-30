@@ -637,22 +637,35 @@ body {
   padding: 24px 8px;
 }
 
-.cc-board-show-more {
-  display: block;
-  width: 100%;
-  padding: 6px 12px;
-  background: transparent;
-  border: 1px dashed var(--cc-border);
+.cc-board-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 0;
+  margin-top: 4px;
+}
+.cc-board-page-btn {
+  background: var(--cc-surface-hover);
+  border: 1px solid var(--cc-border);
   border-radius: var(--cc-radius-sm);
-  color: var(--cc-text-muted);
-  font-size: 12px;
+  color: var(--cc-text-secondary);
+  font-size: 13px;
+  padding: 2px 10px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
-
-.cc-board-show-more:hover {
+.cc-board-page-btn:hover:not(:disabled) {
   border-color: var(--cc-accent);
   color: var(--cc-accent);
+}
+.cc-board-page-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.cc-board-page-info {
+  color: var(--cc-text-muted);
+  font-size: 12px;
 }
 
 /* ── Ops Grid ──────────────────────────────────────────────────── */
