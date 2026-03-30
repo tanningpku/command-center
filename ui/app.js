@@ -271,14 +271,26 @@ async function loadDashboardData() {
     const data = await apiCall('/api/dashboard');
     const blocks = data.blocks || [];
     renderDashboard(blocks);
-  } catch {
-    dom.dashboardContainer.innerHTML = `
-      <div class="cc-dashboard-empty">
-        <div class="cc-empty-icon">H</div>
-        <h2>Dashboard</h2>
-        <p>No dashboard configured yet. Captain will populate this once the project is active.</p>
-      </div>
-    `;
+  } catch (err) {
+    const is404 = err.message && (err.message.includes('404') || err.message.includes('not found') || err.message.includes('Not Found'));
+    if (is404) {
+      dom.dashboardContainer.innerHTML = `
+        <div class="cc-dashboard-empty">
+          <div class="cc-empty-icon">H</div>
+          <h2>Dashboard</h2>
+          <p>No dashboard configured yet. Captain will populate this once the project is active.</p>
+        </div>
+      `;
+    } else {
+      console.error('Failed to load dashboard:', err);
+      dom.dashboardContainer.innerHTML = `
+        <div class="cc-dashboard-empty">
+          <div class="cc-empty-icon">H</div>
+          <h2>Dashboard</h2>
+          <p>Unable to load dashboard: ${escapeHtml(err.message)}</p>
+        </div>
+      `;
+    }
   }
 }
 
