@@ -137,6 +137,69 @@ actor APIService {
         return try await fetch("api/kb/read", query: query)
     }
 
+    // MARK: - Voice transcription
+
+    func transcribeAudio(fileURL: URL) async throws -> TranscriptionResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/harness/voice/transcribe"))
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let projectId { req.setValue(projectId, forHTTPHeaderField: "X-Project-Id") }
+        req.timeoutInterval = 60
+
+        let audioData = try Data(contentsOf: fileURL)
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"recording.m4a\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        return try JSONDecoder().decode(TranscriptionResponse.self, from: data)
+    }
+
+    // MARK: - Image upload
+
+    func uploadImage(imageData: Data, fileName: String, caption: String?, threadId: String, sender: String = "user") async throws -> SendMessageResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/message/image"))
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let projectId { req.setValue(projectId, forHTTPHeaderField: "X-Project-Id") }
+        req.timeoutInterval = 60
+
+        var body = Data()
+        // Text fields
+        for (key, value) in [("sender", sender), ("source", "ios"), ("threadId", threadId)] {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        if let caption, !caption.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"caption\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(caption)\r\n".data(using: .utf8)!)
+        }
+        // Image file
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        return try JSONDecoder().decode(SendMessageResponse.self, from: data)
+    }
+
     // MARK: - Ops
 
     func fetchOps() async throws -> OpsResponse {
@@ -170,4 +233,9 @@ struct KBReadResponse: Codable {
     let file: String
     let content: String
     let section: String?
+}
+
+struct TranscriptionResponse: Codable {
+    let text: String
+    let language: String?
 }
