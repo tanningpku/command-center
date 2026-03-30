@@ -24,7 +24,10 @@ HEALTHY_THRESHOLD=30  # seconds before considering the process stable
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dev)            DEV_MODE=true; shift;;
-    --max-restarts)   MAX_RESTARTS="$2"; shift 2;;
+    --max-restarts)
+      [ -z "${2:-}" ] && { echo "Error: --max-restarts requires a number" >&2; exit 2; }
+      [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: --max-restarts must be a positive integer" >&2; exit 2; }
+      MAX_RESTARTS="$2"; shift 2;;
     *)                echo "Unknown flag: $1" >&2; exit 2;;
   esac
 done
@@ -103,9 +106,11 @@ while true; do
 
   sleep "$BACKOFF"
 
-  # Exponential backoff (double, cap at max)
-  BACKOFF=$(( BACKOFF * 2 ))
-  if [ "$BACKOFF" -gt "$BACKOFF_MAX" ]; then
-    BACKOFF="$BACKOFF_MAX"
+  # Exponential backoff on crash only (double, cap at max); healthy exits stay at initial
+  if [ "$ELAPSED" -lt "$HEALTHY_THRESHOLD" ]; then
+    BACKOFF=$(( BACKOFF * 2 ))
+    if [ "$BACKOFF" -gt "$BACKOFF_MAX" ]; then
+      BACKOFF="$BACKOFF_MAX"
+    fi
   fi
 done
