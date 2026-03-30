@@ -1,8 +1,8 @@
 import Foundation
 
 enum AppConfig {
-    /// Default gateway URL — Ubuntu RTX machine on LAN
-    static let defaultBaseURL = "http://192.168.86.27:3300"
+    /// Default gateway URL — Cloudflare tunnel (works on any network)
+    static let defaultBaseURL = "https://cc.tanningpku.com"
 
     /// UserDefaults key for persisted base URL
     static let baseURLKey = "gatewayBaseURL"

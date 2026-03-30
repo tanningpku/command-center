@@ -19,12 +19,11 @@ struct ThreadListView: View {
                         description: Text("Threads will appear here when agents start working."))
                 } else {
                     List(threadStore.threads) { thread in
-                        Button {
-                            navigationPath.append(thread)
-                        } label: {
-                            ThreadRowView(thread: thread)
-                        }
-                        .buttonStyle(.plain)
+                        ThreadRowView(thread: thread)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture { navigationPath.append(thread) }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     }
                     .listStyle(.plain)
                     .refreshable { await threadStore.loadThreads() }
