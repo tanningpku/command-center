@@ -27,7 +27,7 @@ case "${1:-help}" in
     case "${2:-list}" in
       create)
         shift 2
-        TITLE="" PRIORITY="normal" LABELS="" ISSUE="" ASSIGNEE="" DESC=""
+        TITLE="" PRIORITY="normal" LABELS="" ISSUE="" ASSIGNEE="" DESC="" COLLABORATORS=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
             --title) TITLE="$2"; shift 2;;
@@ -36,6 +36,7 @@ case "${1:-help}" in
             --github-issue) ISSUE="$2"; shift 2;;
             --assignee) ASSIGNEE="$2"; shift 2;;
             --description) DESC="$2"; shift 2;;
+            --collaborators) COLLABORATORS="$2"; shift 2;;
             *) echo "Unknown flag: $1"; exit 2;;
           esac
         done
@@ -44,6 +45,7 @@ case "${1:-help}" in
         [ -n "$DESC" ] && BODY="$BODY,\"description\":\"$DESC\""
         [ -n "$ISSUE" ] && BODY="$BODY,\"githubIssue\":$ISSUE"
         [ -n "$ASSIGNEE" ] && BODY="$BODY,\"assignee\":\"$ASSIGNEE\""
+        [ -n "$COLLABORATORS" ] && BODY="$BODY,\"collaborators\":[$(echo "$COLLABORATORS" | tr ',' '\n' | jq -Rn '[inputs]' | sed 's/^\[//;s/\]$//')]"
         [ -n "$LABELS" ] && BODY="$BODY,\"labels\":[$(echo "$LABELS" | sed 's/[^,]*/\"&\"/g')]"
         BODY="$BODY}"
         json_post "/api/tasks" "$BODY"
@@ -688,7 +690,7 @@ print(f'{display_name} | Tasks: {tasks_summary} | Agents: {agents_summary}')
     echo "Usage: cc <command> [subcommand] [flags]"
     echo ""
     echo "Task Management:"
-    echo "  task create   --title <t> [--priority <p>] [--assignee <a>] [--github-issue <n>]"
+    echo "  task create   --title <t> [--priority <p>] [--assignee <a>] [--collaborators <c1,c2>] [--github-issue <n>]"
     echo "  task list     [--state <s>] [--assignee <a>]"
     echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>]"
     echo "  task complete --id <id> [--note <n>]"

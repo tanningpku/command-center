@@ -1283,10 +1283,13 @@ export class Gateway {
     if (method === "POST" && pathname === "/api/tasks") {
       const body = await this.readBody(req);
       if (!body.title) { this.sendJson(res, 400, { error: "title is required" }); return; }
+      const collaborators = Array.isArray(body.collaborators) ? body.collaborators.map((s: string) => String(s).trim()).filter(Boolean)
+        : typeof body.collaborators === "string" ? body.collaborators.split(",").map((s: string) => s.trim()).filter(Boolean)
+        : undefined;
       const task = store.create({
         title: body.title, description: body.description, githubIssue: body.githubIssue,
         priority: body.priority, labels: body.labels, createdBy: body.createdBy ?? "unknown",
-        assignee: body.assignee,
+        assignee: body.assignee, collaborators,
       });
 
       // Create git worktree for this task (isolation per task)
@@ -1317,6 +1320,11 @@ export class Gateway {
         ];
         if (task.assignee && task.assignee !== "captain") {
           participants.push({ participantType: "assistant", participantId: task.assignee, role: "assignee" });
+        }
+        for (const collab of task.collaborators) {
+          if (collab !== "captain" && collab !== task.assignee) {
+            participants.push({ participantType: "assistant", participantId: collab, role: "collaborator" });
+          }
         }
         const thread = threadStore.createThread({
           title: `${task.id}: ${task.title}`,
@@ -1349,14 +1357,27 @@ export class Gateway {
       const id = pathname.split("/")[3];
       if (!id) { this.sendJson(res, 400, { error: "task id required" }); return; }
       const body = await this.readBody(req);
+      // Normalize collaborators before storing
+      if (body.collaborators) {
+        body.collaborators = Array.isArray(body.collaborators)
+          ? body.collaborators.map((s: string) => String(s).trim()).filter(Boolean)
+          : typeof body.collaborators === "string"
+            ? body.collaborators.split(",").map((s: string) => s.trim()).filter(Boolean)
+            : [];
+      }
       const task = store.update(id, body, body.actor ?? "unknown");
 
-      // Post status update to task thread + add assignee as participant
+      // Post status update to task thread + add assignee/collaborators as participants
       if (task.threadId) {
         const threadStore = this.threadStores.get(projectId);
         if (threadStore) {
           if (body.assignee) {
             threadStore.addParticipant(task.threadId, { participantType: "assistant", participantId: body.assignee, role: "assignee" });
+          }
+          if (body.collaborators) {
+            for (const collab of body.collaborators) {
+              threadStore.addParticipant(task.threadId, { participantType: "assistant", participantId: collab, role: "collaborator" });
+            }
           }
           if (body.state || body.latestUpdate) {
             const parts: string[] = [];
