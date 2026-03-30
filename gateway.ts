@@ -620,6 +620,22 @@ export class Gateway {
         return;
       }
 
+      // --- Dashboard endpoints ---
+      if (pathname === "/api/dashboard") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        if (method === "GET") {
+          this.handleDashboardGet(res, projectId);
+          return;
+        }
+        if (method === "POST") {
+          await this.handleDashboardPost(req, res, projectId);
+          return;
+        }
+        this.sendJson(res, 405, { error: "Method not allowed" });
+        return;
+      }
+
       // --- Catch-all for unknown API routes ---
       if (pathname.startsWith("/api/")) {
         this.sendJson(res, 404, { error: `Unknown endpoint: ${method} ${pathname}` });
@@ -1714,6 +1730,50 @@ export class Gateway {
     }
 
     return results;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Dashboard handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  private dashboardPath(projectId: string): string {
+    return path.join(this.dataDir, `${projectId}-dashboard.json`);
+  }
+
+  private handleDashboardGet(res: http.ServerResponse, projectId: string): void {
+    const filePath = this.dashboardPath(projectId);
+    try {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const data = JSON.parse(raw);
+      this.sendJson(res, 200, data);
+    } catch {
+      // No dashboard yet — return empty default
+      this.sendJson(res, 200, { updatedAt: null, updatedBy: null, blocks: [] });
+    }
+  }
+
+  private async handleDashboardPost(req: http.IncomingMessage, res: http.ServerResponse, projectId: string): Promise<void> {
+    const body = await this.readBody(req);
+    const blocks = body.blocks;
+    if (!Array.isArray(blocks)) {
+      this.sendJson(res, 400, { error: "blocks must be an array" });
+      return;
+    }
+
+    const updatedBy = body.updatedBy ?? this.resolveUserId(req);
+    const dashboard = {
+      updatedAt: new Date().toISOString(),
+      updatedBy,
+      blocks,
+    };
+
+    const filePath = this.dashboardPath(projectId);
+    fs.writeFileSync(filePath, JSON.stringify(dashboard, null, 2), "utf-8");
+
+    // Broadcast SSE event
+    this.sseHub.publish(projectId, "dashboard_update", dashboard);
+
+    this.sendJson(res, 200, dashboard);
   }
 
   private async readBody(req: http.IncomingMessage): Promise<Record<string, any>> {
