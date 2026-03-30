@@ -108,6 +108,16 @@ export class ThreadStore {
         `INSERT INTO thread_participants (thread_id, participant_type, participant_id, role, created_at) VALUES ('main', 'assistant', 'captain', 'lead', ?)`,
       ).run(now);
     }
+
+    // Ensure a "team" broadcast thread exists (all agents auto-joined)
+    const team = this.db.prepare(`SELECT id FROM threads WHERE id = 'team'`).get();
+    if (!team) {
+      const now = new Date().toISOString();
+      this.db.prepare(`INSERT INTO threads (id, title, status, created_at, updated_at) VALUES ('team', 'Team', 'active', ?, ?)`).run(now, now);
+      this.db.prepare(
+        `INSERT INTO thread_participants (thread_id, participant_type, participant_id, role, created_at) VALUES ('team', 'assistant', 'captain', 'lead', ?)`,
+      ).run(now);
+    }
   }
 
   /* ---- Threads ---- */

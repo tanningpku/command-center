@@ -1020,6 +1020,11 @@ export class Gateway {
         createdBy: body.createdBy ?? "captain",
       });
       this.sseHub.publish(projectId, "agent_created", agent);
+      // Auto-add agent to team broadcast thread
+      const threads = this.threadStores.get(projectId);
+      if (threads) {
+        threads.addParticipant("team", { participantType: "assistant", participantId: agent.id });
+      }
       this.dispatchMessage({
         projectId,
         threadId: "main",
