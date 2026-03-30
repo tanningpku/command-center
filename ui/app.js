@@ -16,6 +16,8 @@ const state = {
   agentDetailId: null,       // Currently open agent detail panel
   agentDetailTab: 'instruction', // 'instruction' or 'kb'
   unreadThreads: {},         // threadId → true if has unread messages
+  chatHasMore: false,        // true if more messages available before current page
+  chatOldestTimestamp: null,  // createdAt of earliest loaded message
 };
 
 // ── DOM References ───────────────────────────────────────────────
@@ -1109,13 +1111,21 @@ async function selectThread(threadId) {
   await loadChatMessages(threadId);
 }
 
+const MESSAGES_PER_PAGE = 50;
+
 async function loadChatMessages(threadId) {
   const chatMessages = document.getElementById('chatMessages');
   chatMessages.innerHTML = `<div class="cc-loading">Loading messages...</div>`;
+  state.chatHasMore = false;
+  state.chatOldestTimestamp = null;
 
   try {
-    const data = await apiCall(`/api/threads/${encodeURIComponent(threadId)}/messages?limit=50`);
+    const data = await apiCall(`/api/threads/${encodeURIComponent(threadId)}/messages?limit=${MESSAGES_PER_PAGE}`);
     const messages = data.messages || data || [];
+    state.chatHasMore = messages.length >= MESSAGES_PER_PAGE;
+    if (messages.length > 0) {
+      state.chatOldestTimestamp = messages[0].createdAt;
+    }
     renderChatMessages(messages);
   } catch (err) {
     console.error('Failed to load messages:', err);
@@ -1135,8 +1145,71 @@ function renderChatMessages(messages) {
     return;
   }
 
-  chatMessages.innerHTML = messages.map(msg => renderChatBubble(msg)).join('');
+  const loadMoreHtml = state.chatHasMore
+    ? `<button class="cc-load-more-btn" onclick="loadOlderMessages()">Load older messages</button>`
+    : '';
+  chatMessages.innerHTML = loadMoreHtml + messages.map(msg => renderChatBubble(msg)).join('');
   scrollChatToBottom();
+}
+
+async function loadOlderMessages() {
+  if (!state.activeThreadId || !state.chatOldestTimestamp) return;
+
+  const btn = document.querySelector('.cc-load-more-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+  }
+
+  try {
+    const before = encodeURIComponent(state.chatOldestTimestamp);
+    const data = await apiCall(
+      `/api/threads/${encodeURIComponent(state.activeThreadId)}/messages?limit=${MESSAGES_PER_PAGE}&before=${before}`
+    );
+    const older = data.messages || data || [];
+    if (older.length === 0) {
+      state.chatHasMore = false;
+      if (btn) btn.remove();
+      return;
+    }
+
+    state.chatHasMore = older.length >= MESSAGES_PER_PAGE;
+    state.chatOldestTimestamp = older[0].createdAt;
+
+    // Prepend while preserving scroll position
+    const chatMessages = document.getElementById('chatMessages');
+    const prevScrollHeight = chatMessages.scrollHeight;
+
+    // Remove old load-more button
+    if (btn) btn.remove();
+
+    // Build new HTML: optional new button + older messages
+    const fragment = document.createDocumentFragment();
+    if (state.chatHasMore) {
+      const newBtn = document.createElement('button');
+      newBtn.className = 'cc-load-more-btn';
+      newBtn.textContent = 'Load older messages';
+      newBtn.onclick = loadOlderMessages;
+      fragment.appendChild(newBtn);
+    }
+    for (const msg of older) {
+      const div = document.createElement('div');
+      div.innerHTML = renderChatBubble(msg);
+      fragment.appendChild(div.firstElementChild);
+    }
+    chatMessages.insertBefore(fragment, chatMessages.firstChild);
+
+    // Restore scroll position so view doesn't jump
+    requestAnimationFrame(() => {
+      chatMessages.scrollTop = chatMessages.scrollHeight - prevScrollHeight;
+    });
+  } catch (err) {
+    console.error('Failed to load older messages:', err);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Load older messages';
+    }
+  }
 }
 
 function renderChatBubble(msg) {
