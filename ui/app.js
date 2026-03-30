@@ -1234,7 +1234,10 @@ async function loadOlderMessages() {
 
 function renderImageGrid(imagePaths) {
   if (!imagePaths || !imagePaths.length) return '';
-  const imgs = imagePaths.map(p => {
+  const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const filtered = imagePaths.filter(p => imageExts.some(ext => p.toLowerCase().endsWith(ext)));
+  if (!filtered.length) return '';
+  const imgs = filtered.map(p => {
     const src = `/api/harness/media?path=${encodeURIComponent(p)}`;
     return `<img class="cc-chat-image" src="${escapeHtml(src)}" alt="uploaded image" loading="lazy" onclick="openImageLightbox('${escapeHtml(src)}')" />`;
   }).join('');

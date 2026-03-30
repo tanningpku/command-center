@@ -1531,20 +1531,25 @@ export class Gateway {
       return;
     }
 
+    // Filter to only actual image files for metadata
+    const imageExts = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+    const imagePaths = savedPaths.filter(p => imageExts.some(ext => p.toLowerCase().endsWith(ext)));
+
     // Post a message with image paths in metadata if thread_id provided
     const threadId = parsed.searchParams.get("thread_id") ?? parsed.searchParams.get("threadId") ?? fields["threadId"] ?? undefined;
     if (threadId) {
       const sender = fields["sender"] ?? req.headers["x-user-id"] as string | undefined ?? "user";
       const caption = fields["caption"] || "";
+      const pathsForContent = imagePaths.length ? imagePaths : savedPaths;
       this.dispatchMessage({
         projectId,
         threadId,
         sender: { id: sender, type: "user" },
         channel: "thread",
         mode: "text",
-        content: caption || `[image: ${savedPaths.join(", ")}]`,
+        content: caption || `[image: ${pathsForContent.join(", ")}]`,
         source: fields["source"] ?? "upload",
-        metadata: { imagePaths: savedPaths, ...(caption ? { caption } : {}) },
+        metadata: { imagePaths: imagePaths.length ? imagePaths : savedPaths, ...(caption ? { caption } : {}) },
       });
     }
 

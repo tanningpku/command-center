@@ -6,6 +6,11 @@ struct BoardView: View {
     @Environment(ProjectStore.self) var projectStore
     @State private var selectedTask: CCTask?
 
+    /// Only show columns that have tasks
+    private var activeColumns: [TaskState] {
+        BoardStore.columns.filter { !boardStore.tasksForState($0).isEmpty }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -18,14 +23,13 @@ struct BoardView: View {
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 12) {
-                            ForEach(BoardStore.columns, id: \.self) { state in
+                            ForEach(activeColumns, id: \.self) { state in
                                 let tasks = boardStore.tasksForState(state)
                                 KanbanColumn(state: state, tasks: tasks, onSelect: { selectedTask = $0 })
                             }
                         }
                         .padding()
                     }
-                    .refreshable { await boardStore.loadTasks() }
                 }
             }
             .navigationTitle("Board")
