@@ -57,15 +57,21 @@ struct CCMessage: Identifiable, Hashable {
     var isAssistant: Bool { role == "assistant" }
     var isSystem: Bool { kind == "system" }
 
+    private static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
+
+    private static func isImageFile(_ path: String) -> Bool {
+        guard let dot = path.lastIndex(of: ".") else { return false }
+        let ext = path[path.index(after: dot)...].lowercased()
+        return imageExtensions.contains(ext)
+    }
+
     /// Extract image paths from message metadata or content pattern [image: path1, path2]
     var extractImagePaths: [String]? {
         // Check metadata for imagePaths array
         if case .object(let dict) = metadata,
            case .array(let paths) = dict["imagePaths"] {
             let result = paths.compactMap { item -> String? in
-                if case .string(let s) = item, s.hasSuffix(".jpg") || s.hasSuffix(".jpeg") || s.hasSuffix(".png") || s.hasSuffix(".gif") {
-                    return s
-                }
+                if case .string(let s) = item, Self.isImageFile(s) { return s }
                 return nil
             }
             if !result.isEmpty { return result }
@@ -74,7 +80,7 @@ struct CCMessage: Identifiable, Hashable {
         guard content.hasPrefix("[image: ") && content.hasSuffix("]") else { return nil }
         let inner = String(content.dropFirst(8).dropLast(1))
         let paths = inner.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.hasSuffix(".jpg") || $0.hasSuffix(".jpeg") || $0.hasSuffix(".png") || $0.hasSuffix(".gif") }
+            .filter { Self.isImageFile($0) }
         return paths.isEmpty ? nil : paths
     }
 
