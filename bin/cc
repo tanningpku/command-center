@@ -387,6 +387,29 @@ case "${1:-help}" in
     esac
     ;;
 
+  # ── Dashboard commands ─────────────────────────────────────────
+  dashboard)
+    case "${2:-get}" in
+      get)
+        json_get "/api/dashboard"
+        ;;
+      set)
+        shift 2
+        BLOCKS=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --blocks) BLOCKS="$2"; shift 2;;
+            *) echo "Unknown flag: $1"; exit 2;;
+          esac
+        done
+        [ -z "$BLOCKS" ] && echo "Error: --blocks is required" && exit 2
+        BODY=$(jq -nc --argjson b "$BLOCKS" '{blocks: $b}')
+        json_post "/api/dashboard" "$BODY"
+        ;;
+      *) echo "Usage: cc dashboard <get|set --blocks JSON>"; exit 2;;
+    esac
+    ;;
+
   # ── Harness exec ──────────────────────────────────────────────
   exec)
     shift
@@ -691,6 +714,10 @@ print(f'{display_name} | Tasks: {tasks_summary} | Agents: {agents_summary}')
     echo "  kb patch      --file <f> --append <text> [--section <s>]"
     echo "  kb delete     --file <f>"
     echo "  kb delete-section --file <f> --section <s>"
+    echo ""
+    echo "Dashboard:"
+    echo "  dashboard get                   Get current dashboard blocks"
+    echo "  dashboard set --blocks <json>   Set dashboard blocks (JSON array)"
     echo ""
     echo "Threads & Messages:"
     echo "  thread list   [limit]"
