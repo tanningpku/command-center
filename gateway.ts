@@ -799,6 +799,11 @@ export class Gateway {
     const dirName = projectName || path.basename(directory.replace(/\/+$/, ""));
     const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
+    if (!id) {
+      this.sendJson(res, 400, { error: "name must contain at least one alphanumeric character" });
+      return;
+    }
+
     if (this.projects.has(id)) {
       this.sendJson(res, 409, { error: `Project '${id}' already exists` });
       return;
