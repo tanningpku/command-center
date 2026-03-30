@@ -705,9 +705,16 @@ export class Gateway {
     store: ThreadStore,
     projectId: string,
   ): Promise<void> {
-    // GET /api/threads
+    // GET /api/threads (with unread counts)
     if (method === "GET" && pathname === "/api/threads") {
-      this.sendJson(res, 200, { threads: store.listThreadsWithParticipants() });
+      const userId = this.resolveUserId(req);
+      const threads = store.listThreadsWithParticipants();
+      const unreadCounts = store.getUnreadCounts(userId);
+      const enriched = threads.map((t) => ({
+        ...t,
+        unreadCount: unreadCounts.get(t.id) ?? 0,
+      }));
+      this.sendJson(res, 200, { threads: enriched });
       return;
     }
 
@@ -738,6 +745,16 @@ export class Gateway {
     if (participantsMatch && method === "GET") {
       const threadId = decodeURIComponent(participantsMatch[1]);
       this.sendJson(res, 200, { participants: store.getParticipants(threadId) });
+      return;
+    }
+
+    // POST /api/threads/:id/read — mark thread as read for current user
+    const readMatch = pathname.match(/^\/api\/threads\/([^/]+)\/read$/);
+    if (readMatch && method === "POST") {
+      const threadId = decodeURIComponent(readMatch[1]);
+      const userId = this.resolveUserId(req);
+      store.markRead(threadId, userId);
+      this.sendJson(res, 200, { ok: true, threadId, userId });
       return;
     }
 
@@ -1298,6 +1315,11 @@ export class Gateway {
       return this.projects.keys().next().value ?? null;
     }
     return null;
+  }
+
+  private resolveUserId(req: http.IncomingMessage): string {
+    const header = req.headers["x-user-id"];
+    return typeof header === "string" && header.length > 0 ? header : "user";
   }
 
   private resolveAgentId(req: http.IncomingMessage, parsed: URL): string | null {
