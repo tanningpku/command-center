@@ -64,6 +64,11 @@ cd "$PROJECT_DIR"
 if [ "$DEV_MODE" = "true" ]; then
   CMD="npx tsx index.ts"
 else
+  # Auto-build if dist is missing or stale
+  if [ ! -f dist/index.js ] || [ gateway.ts -nt dist/index.js ] || [ index.ts -nt dist/index.js ]; then
+    log "Building TypeScript..."
+    npm run build || { log "Build failed"; exit 1; }
+  fi
   CMD="node dist/index.js"
 fi
 
