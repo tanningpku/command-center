@@ -508,22 +508,61 @@ for s, n in sorted(by_state.items()):
     ;;
 
   status)
-    echo "=== Projects ==="
-    json_get "/api/registry"
-    echo ""
-    echo "=== Tasks ==="
-    json_get "/api/tasks" | python3 -c "
+    # Fetch tasks, agents, and registry in parallel
+    TASKS_JSON=$(json_get "/api/tasks" 2>/dev/null)
+    AGENTS_JSON=$(json_get "/api/agents" 2>/dev/null)
+    REG_JSON=$(json_get "/api/registry" 2>/dev/null)
+
+    python3 -c "
 import json, sys
-d = json.load(sys.stdin)
-tasks = d.get('tasks', [])
-print(f'{len(tasks)} tasks')
-for t in tasks[:5]:
-    print(f\"  {t['id']}: [{t['state']}] {t['title']}\")
-if len(tasks)>5: print(f'  ...and {len(tasks)-5} more')
-" 2>/dev/null
-    echo ""
-    echo "=== Agents ==="
-    json_get "/api/agents"
+
+tasks_raw = '''$TASKS_JSON'''
+agents_raw = '''$AGENTS_JSON'''
+reg_raw = '''$REG_JSON'''
+
+try:
+    tasks = json.loads(tasks_raw).get('tasks', [])
+except: tasks = []
+try:
+    agents = json.loads(agents_raw).get('agents', [])
+except: agents = []
+try:
+    projects = json.loads(reg_raw).get('projects', [])
+except: projects = []
+
+# Find current project
+proj_name = '$PROJECT'
+proj_info = next((p for p in projects if p['id'] == proj_name), None)
+display_name = proj_info['name'] if proj_info else proj_name
+
+# Tasks by state
+by_state = {}
+for t in tasks:
+    s = t.get('state', 'unknown')
+    by_state[s] = by_state.get(s, 0) + 1
+
+state_order = ['in_progress', 'assigned', 'blocked', 'in_review', 'created', 'done', 'cancelled']
+state_parts = []
+for s in state_order:
+    if s in by_state:
+        state_parts.append(f'{by_state[s]} {s}')
+for s in sorted(by_state):
+    if s not in state_order:
+        state_parts.append(f'{by_state[s]} {s}')
+
+tasks_summary = ', '.join(state_parts) if state_parts else 'no tasks'
+
+# Agents
+active = sum(1 for a in agents if a.get('status') == 'active')
+bridge_connected = sum(1 for a in agents if a.get('bridgeStatus') == 'connected')
+total_agents = len(agents)
+if bridge_connected > 0:
+    agents_summary = f'{active} active ({bridge_connected}/{total_agents} bridged)'
+else:
+    agents_summary = f'{active}/{total_agents} active'
+
+print(f'{display_name} | Tasks: {tasks_summary} | Agents: {agents_summary}')
+" 2>/dev/null || echo "[cc] status: could not fetch data (is gateway running?)"
     ;;
 
   # ── Gateway lifecycle ─────────────────────────────────────────
