@@ -37,6 +37,7 @@ targets:
       path: CommandCenter/Info.plist
       properties:
         CFBundleDisplayName: Command Center
+        CFBundleIconName: AppIcon
         LSRequiresIPhoneOS: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
