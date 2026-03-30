@@ -796,9 +796,6 @@ export class Gateway {
       directory = path.join(home, "code", projectName);
     }
 
-    // Ensure project directory exists
-    fs.mkdirSync(directory, { recursive: true });
-
     const dirName = projectName || path.basename(directory.replace(/\/+$/, ""));
     const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
@@ -806,6 +803,9 @@ export class Gateway {
       this.sendJson(res, 409, { error: `Project '${id}' already exists` });
       return;
     }
+
+    // Ensure project directory exists (after duplicate check)
+    fs.mkdirSync(directory, { recursive: true });
 
     // Auto-assign next available port starting from 3200
     const usedPorts = new Set(Array.from(this.projects.values()).map((p) => p.port));
