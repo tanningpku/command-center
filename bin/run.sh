@@ -44,17 +44,19 @@ log() {
 
 # ── Signal handling ────────────────────────────────────────────────
 cleanup() {
+  local sig="${1:-TERM}"
   INTENTIONAL_EXIT=true
   if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
-    log "Forwarding signal to process $CHILD_PID"
-    kill -TERM "$CHILD_PID" 2>/dev/null || true
+    log "Forwarding SIG$sig to process $CHILD_PID"
+    kill -"$sig" "$CHILD_PID" 2>/dev/null || true
     wait "$CHILD_PID" 2>/dev/null || true
   fi
   log "Exiting"
   exit 0
 }
 
-trap cleanup SIGINT SIGTERM
+trap 'cleanup INT' SIGINT
+trap 'cleanup TERM' SIGTERM
 
 # ── Build command ──────────────────────────────────────────────────
 cd "$PROJECT_DIR"
@@ -98,13 +100,13 @@ while true; do
     log "Process crashed (code $EXIT_CODE) after ${ELAPSED}s. Restart #$RESTART_COUNT in ${BACKOFF}s..."
   fi
 
-  # Check max restarts
-  if [ "$MAX_RESTARTS" -gt 0 ] && [ "$RESTART_COUNT" -ge "$MAX_RESTARTS" ]; then
-    log "Reached max consecutive restarts ($MAX_RESTARTS). Giving up."
+  sleep "$BACKOFF"
+
+  # Check max restarts (after sleep, before next launch)
+  if [ "$MAX_RESTARTS" -gt 0 ] && [ "$RESTART_COUNT" -gt "$MAX_RESTARTS" ]; then
+    log "Reached max restarts ($MAX_RESTARTS). Giving up."
     exit 1
   fi
-
-  sleep "$BACKOFF"
 
   # Exponential backoff on crash only (double, cap at max); healthy exits stay at initial
   if [ "$ELAPSED" -lt "$HEALTHY_THRESHOLD" ]; then
