@@ -1226,6 +1226,29 @@ async function loadOlderMessages() {
   }
 }
 
+function renderImageGrid(imagePaths) {
+  if (!imagePaths || !imagePaths.length) return '';
+  const imgs = imagePaths.map(p => {
+    const src = `/api/harness/media?path=${encodeURIComponent(p)}`;
+    return `<img class="cc-chat-image" src="${escapeHtml(src)}" alt="uploaded image" loading="lazy" onclick="openImageLightbox('${escapeHtml(src)}')" />`;
+  }).join('');
+  return `<div class="cc-chat-image-grid">${imgs}</div>`;
+}
+
+function openImageLightbox(src) {
+  let overlay = document.getElementById('cc-lightbox');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'cc-lightbox';
+    overlay.className = 'cc-lightbox-overlay';
+    overlay.innerHTML = '<img class="cc-lightbox-img" />';
+    overlay.addEventListener('click', () => overlay.classList.remove('active'));
+    document.body.appendChild(overlay);
+  }
+  overlay.querySelector('img').src = src;
+  overlay.classList.add('active');
+}
+
 function renderChatBubble(msg) {
   const role = msg.role || 'user';
   const kind = msg.kind || 'message';
@@ -1235,6 +1258,8 @@ function renderChatBubble(msg) {
   const text = msg.text || msg.fullText || msg.content || '';
   const time = msg.createdAt || msg.timestamp;
   const timeStr = time ? formatMessageTime(time) : '';
+  const metadata = msg.metadata || {};
+  const imagePaths = metadata.imagePaths || [];
 
   if (isSystem) {
     return `
@@ -1245,11 +1270,14 @@ function renderChatBubble(msg) {
     `;
   }
 
+  const hasImages = imagePaths.length > 0;
+  const hasText = text && !text.startsWith('[image:');
   const bubbleClass = isAssistant ? 'cc-message-assistant' : 'cc-message-user';
   return `
     <div class="cc-message ${bubbleClass}">
       <div class="cc-message-sender">${escapeHtml(senderName)}</div>
-      <div class="cc-message-text cc-markdown">${renderMarkdown(text)}</div>
+      ${hasText ? `<div class="cc-message-text cc-markdown">${renderMarkdown(text)}</div>` : ''}
+      ${hasImages ? renderImageGrid(imagePaths) : ''}
       ${timeStr ? `<div class="cc-message-time">${escapeHtml(timeStr)}</div>` : ''}
     </div>
   `;
@@ -1516,6 +1544,7 @@ function handleSSEEvent(event) {
           kind: msg.kind || 'message',
           sender: senderId === 'system' ? 'System' : senderId,
           content: msg.content,
+          metadata: msg.metadata,
           createdAt: msg.createdAt,
         });
       } else if (msgThreadId && msgThreadId !== state.activeThreadId) {
