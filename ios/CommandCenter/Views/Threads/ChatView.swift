@@ -32,7 +32,7 @@ struct ChatView: View {
                 // Messages
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 2) {
+                        LazyVStack(spacing: 6) {
                             ForEach(threadStore.messages) { message in
                                 MessageBubbleView(message: message)
                                     .id(message.id)
@@ -40,7 +40,7 @@ struct ChatView: View {
                             // Anchor at bottom — always present, ensures scrollTo target exists
                             Color.clear.frame(height: 1).id("bottom-anchor")
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 12)
                     }
                     .defaultScrollAnchor(.bottom)
                     .onAppear { scrollProxy = proxy }
