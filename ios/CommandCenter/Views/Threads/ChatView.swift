@@ -246,13 +246,16 @@ struct ChatView: View {
                         imageData: imageData, fileName: "screenshot.jpg",
                         caption: text.isEmpty ? nil : text, threadId: threadId
                     )
-                    // Add optimistic local message with image paths
+                    // Add optimistic local message with image paths + caption
                     let jpgPaths = (result.paths ?? []).filter { $0.hasSuffix(".jpg") || $0.hasSuffix(".jpeg") || $0.hasSuffix(".png") }
                     if !jpgPaths.isEmpty {
-                        let content = "[image: \(jpgPaths.joined(separator: ", "))]"
+                        let content = text.isEmpty ? "[image: \(jpgPaths.joined(separator: ", "))]" : text
+                        var metaDict: [String: JSONValue] = ["imagePaths": .array(jpgPaths.map { .string($0) })]
+                        if !text.isEmpty { metaDict["caption"] = .string(text) }
                         let local = CCMessage(
                             threadId: threadId, role: "user", content: content,
-                            sender: "user", source: "upload"
+                            sender: "user", source: "upload",
+                            metadata: .object(metaDict)
                         )
                         threadStore.messages.append(local)
                     }

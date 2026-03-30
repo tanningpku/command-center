@@ -43,7 +43,16 @@ struct MessageBubbleView: View {
 
                     // Image or text content
                     if let imagePaths = message.extractImagePaths, !imagePaths.isEmpty {
-                        imageContent(paths: imagePaths)
+                        VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
+                            imageContent(paths: imagePaths)
+                            if let caption = message.extractCaption, !caption.isEmpty {
+                                MarkdownTextView(caption, foregroundColor: message.isUser ? .white : .primary)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(message.isUser ? Color.blue : Color(.systemGray5))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                            }
+                        }
                     } else {
                         MarkdownTextView(message.content, foregroundColor: message.isUser ? .white : .primary)
                             .padding(.horizontal, 14)

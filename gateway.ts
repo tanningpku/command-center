@@ -1535,15 +1535,16 @@ export class Gateway {
     const threadId = parsed.searchParams.get("thread_id") ?? parsed.searchParams.get("threadId") ?? fields["threadId"] ?? undefined;
     if (threadId) {
       const sender = fields["sender"] ?? req.headers["x-user-id"] as string | undefined ?? "user";
+      const caption = fields["caption"] || "";
       this.dispatchMessage({
         projectId,
         threadId,
         sender: { id: sender, type: "user" },
         channel: "thread",
         mode: "text",
-        content: `[image: ${savedPaths.join(", ")}]`,
+        content: caption || `[image: ${savedPaths.join(", ")}]`,
         source: fields["source"] ?? "upload",
-        metadata: { imagePaths: savedPaths },
+        metadata: { imagePaths: savedPaths, ...(caption ? { caption } : {}) },
       });
     }
 

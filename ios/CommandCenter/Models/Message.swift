@@ -78,6 +78,20 @@ struct CCMessage: Identifiable, Hashable {
         return paths.isEmpty ? nil : paths
     }
 
+    /// Extract caption from metadata or content (if content isn't the [image:] placeholder)
+    var extractCaption: String? {
+        // Check metadata for explicit caption
+        if case .object(let dict) = metadata,
+           case .string(let cap) = dict["caption"], !cap.isEmpty {
+            return cap
+        }
+        // If content doesn't start with [image:, it IS the caption
+        if !content.hasPrefix("[image:") && !content.isEmpty {
+            return content
+        }
+        return nil
+    }
+
     var displaySender: String {
         if isSystem { return "System" }
         return sender ?? (isUser ? "You" : "Agent")
