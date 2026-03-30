@@ -131,6 +131,16 @@ export class ClaudeBridge extends EventEmitter {
   private backoffMs = 1_000;
   private static readonly MAX_BACKOFF_MS = 60_000;
 
+  /* ---- Watchdog state ---- */
+  private lastActivityAt = Date.now();
+  private lastUserMessageAt = 0;
+  private pendingResponse = false;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  /** Timeout in ms before considering a bridge stuck (default: 90s) */
+  static readonly STUCK_TIMEOUT_MS = 90_000;
+  /** How often the watchdog checks for stuck bridges (default: 15s) */
+  private static readonly WATCHDOG_INTERVAL_MS = 15_000;
+
   /** The thread that the most recent user message was sent in. */
   activeThreadId = "main";
 
@@ -153,12 +163,14 @@ export class ClaudeBridge extends EventEmitter {
       return;
     }
     this.spawnChild();
+    this.startWatchdog();
   }
 
   stop(): void {
     this.stopped = true;
     this.autoRestartPending = false;
     this.hasInitialized = false;
+    this.stopWatchdog();
     this.child?.kill();
     this.child = null;
     this.activeSocket?.close();
@@ -184,6 +196,8 @@ export class ClaudeBridge extends EventEmitter {
     if (context) parts.push(context);
     parts.push(`${sender ?? "User"}: ${text}`);
     this.send(buildUserMessage(parts.join("\n")));
+    this.lastUserMessageAt = Date.now();
+    this.pendingResponse = true;
   }
 
   /* ---- Child process management ---- */
@@ -310,6 +324,9 @@ export class ClaudeBridge extends EventEmitter {
   private onMessage(message: Record<string, unknown>): void {
     const type = String(message.type ?? "unknown");
 
+    // Track activity for watchdog
+    this.lastActivityAt = Date.now();
+
     // Forward all raw messages as SSE events
     this.emit("message", message);
 
@@ -343,6 +360,7 @@ export class ClaudeBridge extends EventEmitter {
 
     // Result — turn complete
     if (type === "result") {
+      this.pendingResponse = false;
       this.emit("result", {
         sessionId: String(message.session_id ?? ""),
         totalCostUsd: Number(message.total_cost_usd ?? 0),
@@ -377,5 +395,44 @@ export class ClaudeBridge extends EventEmitter {
       return;
     }
     this.activeSocket.send(encodeNdjson(payload));
+  }
+
+  /* ---- Watchdog ---- */
+
+  private startWatchdog(): void {
+    this.stopWatchdog();
+    this.watchdogTimer = setInterval(() => this.checkStuck(), ClaudeBridge.WATCHDOG_INTERVAL_MS);
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  private checkStuck(): void {
+    if (this.stopped || !this.pendingResponse || this.autoRestartPending) return;
+
+    const elapsed = Date.now() - this.lastUserMessageAt;
+    const sinceActivity = Date.now() - this.lastActivityAt;
+
+    // Only consider stuck if: we're waiting for a response AND
+    // no activity at all since the message was sent AND timeout exceeded
+    if (elapsed < ClaudeBridge.STUCK_TIMEOUT_MS) return;
+    if (this.lastActivityAt > this.lastUserMessageAt) return; // got activity after our message — not stuck
+
+    console.warn(
+      `[${this.tag}] WATCHDOG: Bridge appears stuck — no activity for ${Math.round(sinceActivity / 1000)}s ` +
+      `after user message sent ${Math.round(elapsed / 1000)}s ago. Killing subprocess.`,
+    );
+
+    this.pendingResponse = false;
+    this.emit("watchdog_kill", {
+      agentId: this.opts.agentId ?? "captain",
+      elapsedMs: elapsed,
+      sinceActivityMs: sinceActivity,
+    });
+    this.scheduleAutoRestart("watchdog_stuck");
   }
 }
