@@ -1698,16 +1698,7 @@ document.getElementById('newProjectModal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeNewProjectModal();
 });
 
-// Close modal/panel on Escape key
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (state.agentDetailId) {
-      closeAgentDetail();
-    } else {
-      closeNewProjectModal();
-    }
-  }
-});
+// Escape key handled by unified keyboard shortcut system below
 
 document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1856,17 +1847,194 @@ document.getElementById('chatBtn').addEventListener('click', () => {
   }
 });
 
-// Keyboard shortcuts
+// ── Keyboard Shortcuts ──────────────────────────────────────────
+
+let _lastKey = null;
+let _lastKeyTime = 0;
+const CHORD_TIMEOUT = 500; // ms window for g+X chords
+
+function isInputFocused() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+function getSelectedListIndex(container) {
+  if (!container) return -1;
+  const items = container.querySelectorAll('[data-kb-selectable]');
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].classList.contains('cc-kb-selected')) return i;
+  }
+  return -1;
+}
+
+function selectListItem(container, index) {
+  if (!container) return;
+  const items = container.querySelectorAll('[data-kb-selectable]');
+  if (items.length === 0) return;
+  const clamped = Math.max(0, Math.min(index, items.length - 1));
+  items.forEach(el => el.classList.remove('cc-kb-selected'));
+  items[clamped].classList.add('cc-kb-selected');
+  items[clamped].scrollIntoView({ block: 'nearest' });
+}
+
+function getActiveListContainer() {
+  if (state.activeTab === 'threads') {
+    return document.getElementById('threadList');
+  }
+  if (state.activeTab === 'team') {
+    return document.getElementById('teamGrid');
+  }
+  return null;
+}
+
+function openSelectedItem() {
+  const container = getActiveListContainer();
+  if (!container) return;
+  const selected = container.querySelector('.cc-kb-selected');
+  if (selected) selected.click();
+}
+
+function showShortcutHelp() {
+  let overlay = document.getElementById('shortcutHelpOverlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    return;
+  }
+
+  overlay = document.createElement('div');
+  overlay.id = 'shortcutHelpOverlay';
+  overlay.className = 'cc-modal-overlay';
+  overlay.innerHTML = `
+    <div class="cc-modal cc-shortcut-modal">
+      <div class="cc-modal-header">
+        <h3>Keyboard Shortcuts</h3>
+        <button class="cc-modal-close" id="shortcutHelpClose">&times;</button>
+      </div>
+      <div class="cc-modal-body cc-shortcut-body">
+        <div class="cc-shortcut-group">
+          <div class="cc-shortcut-group-title">Navigation</div>
+          <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>h</kbd><span>Go to Home</span></div>
+          <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>t</kbd><span>Go to Team</span></div>
+          <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>b</kbd><span>Go to Board</span></div>
+          <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>r</kbd><span>Go to Threads</span></div>
+        </div>
+        <div class="cc-shortcut-group">
+          <div class="cc-shortcut-group-title">Lists</div>
+          <div class="cc-shortcut-row"><kbd>j</kbd><span>Move down</span></div>
+          <div class="cc-shortcut-row"><kbd>k</kbd><span>Move up</span></div>
+          <div class="cc-shortcut-row"><kbd>Enter</kbd><span>Open selected</span></div>
+        </div>
+        <div class="cc-shortcut-group">
+          <div class="cc-shortcut-group-title">General</div>
+          <div class="cc-shortcut-row"><kbd>Esc</kbd><span>Close panel / modal</span></div>
+          <div class="cc-shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const closeBtn = document.getElementById('shortcutHelpClose');
+  closeBtn.addEventListener('click', () => overlay.style.display = 'none');
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.style.display = 'none';
+  });
+}
+
+function hideShortcutHelp() {
+  const overlay = document.getElementById('shortcutHelpOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
 document.addEventListener('keydown', (e) => {
-  // Ctrl/Cmd + number to switch tabs
-  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '4') {
+  // Never intercept when typing in an input
+  if (isInputFocused()) return;
+
+  const now = Date.now();
+  const key = e.key;
+
+  // Escape — close modals/panels/help
+  if (key === 'Escape') {
+    const helpOverlay = document.getElementById('shortcutHelpOverlay');
+    if (helpOverlay && helpOverlay.style.display !== 'none') {
+      hideShortcutHelp();
+    } else if (state.agentDetailId) {
+      closeAgentDetail();
+    } else {
+      closeNewProjectModal();
+      closeNewThreadModal();
+    }
+    return;
+  }
+
+  // ? — show shortcut help
+  if (key === '?') {
+    e.preventDefault();
+    showShortcutHelp();
+    return;
+  }
+
+  // Ctrl/Cmd + number shortcuts (keep existing)
+  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '4') {
     e.preventDefault();
     const tabs = ['home', 'team', 'board', 'threads'];
-    const idx = parseInt(e.key, 10) - 1;
+    const idx = parseInt(key, 10) - 1;
     if (tabs[idx] && state.selectedProjectId) {
       showTab(tabs[idx]);
     }
+    return;
   }
+
+  // Don't handle shortcuts with modifiers (except the ones above)
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  // g+X chord navigation
+  if (_lastKey === 'g' && (now - _lastKeyTime) < CHORD_TIMEOUT && state.selectedProjectId) {
+    const chordMap = { h: 'home', t: 'team', b: 'board', r: 'threads' };
+    const tab = chordMap[key];
+    if (tab) {
+      e.preventDefault();
+      showTab(tab);
+      _lastKey = null;
+      return;
+    }
+  }
+
+  // Track key for chord
+  if (key === 'g') {
+    _lastKey = 'g';
+    _lastKeyTime = now;
+    return;
+  }
+
+  // j/k — navigate lists
+  if (key === 'j' || key === 'k') {
+    const container = getActiveListContainer();
+    if (!container) { _lastKey = null; return; }
+
+    // Mark items as selectable if not already
+    const selectableSelector = state.activeTab === 'threads' ? '.cc-thread-card' : '.cc-team-card';
+    const items = container.querySelectorAll(selectableSelector);
+    items.forEach(el => el.setAttribute('data-kb-selectable', ''));
+
+    const current = getSelectedListIndex(container);
+    const next = key === 'j' ? current + 1 : current - 1;
+    selectListItem(container, next);
+    e.preventDefault();
+    _lastKey = null;
+    return;
+  }
+
+  // Enter — open selected item
+  if (key === 'Enter') {
+    openSelectedItem();
+    _lastKey = null;
+    return;
+  }
+
+  _lastKey = null;
 });
 
 // ── Initialization ───────────────────────────────────────────────
