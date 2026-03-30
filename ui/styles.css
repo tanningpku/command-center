@@ -637,6 +637,24 @@ body {
   padding: 24px 8px;
 }
 
+.cc-board-show-more {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px dashed var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  color: var(--cc-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cc-board-show-more:hover {
+  border-color: var(--cc-accent);
+  color: var(--cc-accent);
+}
+
 /* ── Ops Grid ──────────────────────────────────────────────────── */
 .cc-ops-grid {
   display: grid;
