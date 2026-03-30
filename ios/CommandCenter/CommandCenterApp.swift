@@ -68,6 +68,7 @@ struct CommandCenterApp: App {
 /// Root content view that shows either a loading/setup state or the main tab view.
 struct ContentView: View {
     @Environment(ProjectStore.self) var projectStore
+    @State private var showSettings = false
 
     var body: some View {
         Group {
@@ -84,12 +85,17 @@ struct ContentView: View {
                     Text(error)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                    Button("Retry") {
-                        Task { await projectStore.load() }
+                    HStack(spacing: 12) {
+                        Button("Retry") {
+                            Task { await projectStore.load() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Settings") { showSettings = true }
+                            .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .padding()
+                .sheet(isPresented: $showSettings) { SettingsView() }
             } else {
                 MainTabView()
             }

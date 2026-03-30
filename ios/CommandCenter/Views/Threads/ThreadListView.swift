@@ -6,6 +6,7 @@ struct ThreadListView: View {
     @Environment(ProjectStore.self) var projectStore
     @Environment(NavigationRouter.self) var router
     @State private var navigationPath = NavigationPath()
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -35,7 +36,13 @@ struct ThreadListView: View {
                     ProjectSelectorView()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    ConnectionDot(isConnected: threadStore.isConnected)
+                    HStack(spacing: 12) {
+                        ConnectionDot(isConnected: threadStore.isConnected)
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape")
+                                .font(.body)
+                        }
+                    }
                 }
             }
             .navigationDestination(for: CCThread.self) { thread in
@@ -54,6 +61,7 @@ struct ThreadListView: View {
                 navigationPath = NavigationPath()
                 Task { await threadStore.loadThreads() }
             }
+            .sheet(isPresented: $showSettings) { SettingsView() }
         }
     }
 }
