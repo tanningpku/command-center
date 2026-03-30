@@ -40,7 +40,7 @@ CommandCenter/
 │   ├── BoardStore.swift            # Task list by state (kanban columns)
 │   ├── ThreadStore.swift           # Thread list, active thread, messages
 │   ├── OpsStore.swift              # CI builds, open PRs
-│   ├── MetricsStore.swift          # Task breakdown stats
+│   ├── MetricsStore.swift          # Task breakdown computed client-side from /api/tasks
 │   └── NavigationRouter.swift      # Tab selection, deep links, navigation state
 ├── Views/
 │   ├── MainTabView.swift           # 5-tab navigation (Team, Board, Threads, Ops, Metrics)
@@ -303,11 +303,17 @@ actor APIService {
 | Feature | Method | Path | Notes |
 |---------|--------|------|-------|
 | **Registry** | GET | `/api/registry` | No project header needed |
-| **Agents** | GET | `/api/agents` | List team |
+| **Agents** | GET | `/api/agents` | List team (`?status=X`) |
+| **Assistants** | GET | `/api/assistants` | Alias for agents list |
 | **Agent detail** | GET | `/api/agents/{id}` | Single agent |
 | **Tasks** | GET | `/api/tasks` | `?state=X&assignee=Y&limit=N` |
+| **Task detail** | GET | `/api/tasks/{id}` | Single task |
 | **Task update** | PATCH | `/api/tasks/{id}` | State transitions |
+| **Task complete** | POST | `/api/tasks/{id}/complete` | `{ actor, notes? }` |
 | **Threads** | GET | `/api/threads` | List with participants |
+| **Thread detail** | GET | `/api/threads/{id}` | Single thread |
+| **Thread update** | PATCH | `/api/threads/{id}` | `{ title?, status?, summary? }` |
+| **Thread participants** | GET | `/api/threads/{id}/participants` | Participant list |
 | **Thread messages** | GET | `/api/threads/{id}/messages` | `?limit=N&before=ISO` |
 | **Send message** | POST | `/api/message` | `{ thread_id, text, sender, source }` |
 | **Thread create** | POST | `/api/threads` | `{ title, participants[] }` |
@@ -376,7 +382,8 @@ Each store subscribes to relevant SSE events:
 | `agent_created`, `agent_updated`, `agent_archived` | TeamStore | Refresh agent list |
 | `task_created`, `task_updated`, `task_completed` | BoardStore | Refresh kanban columns |
 | `assistant_text` | ThreadStore | Show typing/streaming indicator |
-| `captain_message` | ProjectStore | Update captain status bar |
+| `claude_ready` | TeamStore | Update agent online/offline status |
+| `claude_result` | (ignored) | Turn metadata (cost, session) — no UI action |
 
 ### Connection Lifecycle
 
@@ -666,7 +673,7 @@ Project selector appears as a compact menu in the navigation bar of the currentl
 
 **Deliverables:**
 - [ ] `OpsStore` — CI builds, open PRs, polling refresh
-- [ ] `MetricsStore` — task state breakdown, computed stats
+- [ ] `MetricsStore` — computed client-side from `/api/tasks` + `/api/threads` (no metrics endpoint)
 - [ ] `OpsView` — builds list + PRs list
 - [ ] `BuildRowView` — CI run with status icon, duration, branch
 - [ ] `PRRowView` — PR with author, review status, merge state
