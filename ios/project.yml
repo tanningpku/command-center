@@ -20,10 +20,6 @@ targets:
     platform: iOS
     sources:
       - path: CommandCenter
-        excludes:
-          - "**/*.xcassets"
-    resources:
-      - path: CommandCenter/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.commandcenter.ios
