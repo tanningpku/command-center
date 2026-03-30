@@ -328,7 +328,12 @@ export class Gateway {
       for (const m of messages) {
         const sender = m.sender ?? m.role;
         const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
-        lines.push(`[${time}] ${sender}: ${m.content}`);
+        let content = m.content;
+        const paths = Array.isArray(m.metadata?.imagePaths) ? m.metadata.imagePaths as string[] : [];
+        if (paths.length > 0 && !content.startsWith("[image:")) {
+          content = `[image: ${paths.join(", ")}]\n${content}`;
+        }
+        lines.push(`[${time}] ${sender}: ${content}`);
       }
       lines.push("--- End of history ---", "");
     }
