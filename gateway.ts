@@ -780,18 +780,23 @@ export class Gateway {
 
   private async handleCreateProject(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await this.readBody(req);
-    const { directory, captainName } = body;
+    const projectName = body.name || body.projectName;
+    let directory: string = body.directory;
+    const captainName: string = body.captainName || "Captain";
 
-    if (!directory || typeof directory !== "string") {
-      this.sendJson(res, 400, { error: "directory is required (e.g. /home/ning/code/my-project)" });
+    // Require at least a name or directory
+    if (!projectName && !directory) {
+      this.sendJson(res, 400, { error: "name is required (e.g. 'my-project')" });
       return;
     }
-    if (!captainName || typeof captainName !== "string") {
-      this.sendJson(res, 400, { error: "captainName is required" });
-      return;
+
+    // Default directory to ~/code/<name> if not provided
+    if (!directory) {
+      const home = process.env.HOME || "/home/" + (process.env.USER || "user");
+      directory = path.join(home, "code", projectName);
     }
 
-    const dirName = path.basename(directory.replace(/\/+$/, ""));
+    const dirName = projectName || path.basename(directory.replace(/\/+$/, ""));
     const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
     if (this.projects.has(id)) {
