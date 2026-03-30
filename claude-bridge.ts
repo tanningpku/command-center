@@ -1,0 +1,381 @@
+/**
+ * Claude Bridge for Command Center
+ *
+ * Spawns the Claude CLI per project, manages the WebSocket SDK connection,
+ * handles the NDJSON protocol, and emits typed events.
+ *
+ * Reference: companion/src/core/claude-server.ts + protocol.ts
+ */
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { WebSocket, WebSocketServer } from "ws";
+
+/* ------------------------------------------------------------------ */
+/*  NDJSON Protocol (ported from companion/src/core/protocol.ts)       */
+/* ------------------------------------------------------------------ */
+
+interface NdjsonState { buffer: string }
+
+function createNdjsonState(): NdjsonState { return { buffer: "" }; }
+
+function encodeNdjson(msg: unknown): string { return `${JSON.stringify(msg)}\n`; }
+
+function parseNdjsonChunk(state: NdjsonState, chunk: string): Record<string, unknown>[] {
+  const input = state.buffer + chunk;
+  const lines = input.split("\n");
+  state.buffer = lines.pop() ?? "";
+  const parsed: Record<string, unknown>[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    parsed.push(JSON.parse(trimmed));
+  }
+  return parsed;
+}
+
+function buildInitializeRequest(appendSystemPrompt: string): Record<string, unknown> {
+  return {
+    type: "control_request",
+    request_id: randomUUID(),
+    request: { subtype: "initialize", appendSystemPrompt },
+  };
+}
+
+function buildUserMessage(content: string): Record<string, unknown> {
+  return {
+    type: "user",
+    session_id: "",
+    uuid: randomUUID(),
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+  };
+}
+
+function buildPermissionResponse(requestId: string, behavior: "allow" | "deny", toolInput: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "success",
+      request_id: requestId,
+      response: { behavior, updatedInput: toolInput },
+    },
+  };
+}
+
+function extractAssistantText(message: Record<string, unknown>): string {
+  const payload = message.message as { content?: unknown } | undefined;
+  const blocks = Array.isArray(payload?.content) ? payload.content : [];
+  const out: string[] = [];
+  for (const block of blocks) {
+    const candidate = block as { type?: string; text?: string };
+    if (candidate.type === "text" && typeof candidate.text === "string") {
+      out.push(candidate.text);
+    }
+  }
+  return out.join("\n\n").trim();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface ClaudeBridgeOptions {
+  projectId: string;
+  /** Agent ID (e.g. "captain", "backend-lead") */
+  agentId?: string;
+  /** WebSocket port for Claude SDK (convention: HTTP port + 10000) */
+  wsPort: number;
+  /** Working directory for Claude subprocess */
+  projectDir: string;
+  /** System prompt appended to Claude's default */
+  systemPrompt: string;
+  /** Claude CLI binary (default: "claude") */
+  claudeCommand?: string;
+  /** Skip spawning Claude (for testing) */
+  mockClaude?: boolean;
+  /** Absolute path to command-center bin/ dir (prepended to PATH so `cc` resolves correctly) */
+  ccBinDir?: string;
+  /** Initial prompt sent via -p flag (default: "{agentId} online — ready for work") */
+  initialPrompt?: string;
+}
+
+export interface AssistantTextPayload {
+  text: string;
+  fullText: string;
+  raw: Record<string, unknown>;
+}
+
+export interface ResultPayload {
+  sessionId: string;
+  totalCostUsd: number;
+  subtype: string;
+  resultText: string;
+  raw: Record<string, unknown>;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Bridge                                                             */
+/* ------------------------------------------------------------------ */
+
+export class ClaudeBridge extends EventEmitter {
+  private wss: WebSocketServer | null = null;
+  private activeSocket: WebSocket | null = null;
+  private activeState = createNdjsonState();
+  private child: ChildProcess | null = null;
+  private _ready = false;
+  private seenUuids = new Set<string>();
+  private stopped = false;
+  private intentionalRestart = false;
+  private autoRestartPending = false;
+  private backoffMs = 1_000;
+  private static readonly MAX_BACKOFF_MS = 60_000;
+
+  /** The thread that the most recent user message was sent in. */
+  activeThreadId = "main";
+
+  private get tag(): string {
+    return `claude-bridge:${this.opts.projectId}/${this.opts.agentId ?? "captain"}`;
+  }
+
+  constructor(private readonly opts: ClaudeBridgeOptions) {
+    super();
+  }
+
+  async start(): Promise<void> {
+    this.stopped = false;
+    this.wss = new WebSocketServer({ port: this.opts.wsPort, path: "/claude" });
+    this.wss.on("connection", (socket) => this.onConnection(socket));
+    console.log(`[${this.tag}] WS server listening on port ${this.opts.wsPort}`);
+
+    if (this.opts.mockClaude) {
+      console.log(`[${this.tag}] MOCK mode — no subprocess`);
+      return;
+    }
+    this.spawnChild();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.autoRestartPending = false;
+    this.hasInitialized = false;
+    this.child?.kill();
+    this.child = null;
+    this.activeSocket?.close();
+    this.activeSocket = null;
+    this._ready = false;
+    this.wss?.close();
+    this.wss = null;
+  }
+
+  isReady(): boolean {
+    return this._ready && this.activeSocket !== null && this.activeSocket.readyState === WebSocket.OPEN;
+  }
+
+  /** Send a user message to Claude, with thread context, history, and timestamp. */
+  sendUserMessage(text: string, threadId: string, sender?: string, context?: string): void {
+    this.activeThreadId = threadId;
+    const now = new Date();
+    const local = now.toLocaleString("en-US", {
+      weekday: "short", year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+    });
+    const parts: string[] = [`[${local}]`];
+    if (context) parts.push(context);
+    parts.push(`${sender ?? "User"}: ${text}`);
+    this.send(buildUserMessage(parts.join("\n")));
+  }
+
+  /* ---- Child process management ---- */
+
+  private spawnChild(): void {
+    const cmd = this.opts.claudeCommand ?? "claude";
+    const agentId = this.opts.agentId ?? "captain";
+    const prompt = this.opts.initialPrompt ?? `${agentId} online — ready for work`;
+    const args = [
+      "--sdk-url", `ws://localhost:${this.opts.wsPort}/claude`,
+      "--dangerously-skip-permissions",
+      "-p", prompt,
+    ];
+    const childPath = this.opts.ccBinDir
+      ? `${this.opts.ccBinDir}:${process.env.PATH ?? ""}`
+      : process.env.PATH;
+    const child = spawn(cmd, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: this.opts.projectDir,
+      env: { ...process.env, CLAUDECODE: undefined, CC_PROJECT: this.opts.projectId, CC_AGENT: agentId, PATH: childPath },
+    });
+    this.child = child;
+
+    child.stdout?.on("data", (data: Buffer) => {
+      for (const line of data.toString().trim().split("\n")) {
+        console.log(`[${this.tag}:out] ${line}`);
+      }
+    });
+    child.stderr?.on("data", (data: Buffer) => {
+      for (const line of data.toString().trim().split("\n")) {
+        console.error(`[${this.tag}:err] ${line}`);
+      }
+    });
+    child.on("exit", (code, signal) => {
+      console.warn(`[${this.tag}] Claude exited (code=${code}, signal=${signal})`);
+      this.child = null;
+      this._ready = false;
+      if (!this.stopped && !this.intentionalRestart) {
+        this.scheduleAutoRestart("subprocess_exit");
+      }
+    });
+  }
+
+  private scheduleAutoRestart(reason: string): void {
+    if (this.autoRestartPending) return;
+    this.autoRestartPending = true;
+    const delay = this.backoffMs;
+    this.backoffMs = Math.min(this.backoffMs * 2, ClaudeBridge.MAX_BACKOFF_MS);
+    console.log(`[${this.tag}] Auto-restart in ${delay}ms (reason: ${reason})`);
+    setTimeout(() => {
+      this.autoRestartPending = false;
+      if (this.stopped) return;
+      this.intentionalRestart = true;
+      this.killChild();
+      this.spawnChild();
+      const onReady = () => {
+        this.removeListener("ready", onReady);
+        this.backoffMs = 1_000;
+        this.intentionalRestart = false;
+        this.emit("restarted", { reason });
+      };
+      this.on("ready", onReady);
+    }, delay);
+  }
+
+  private killChild(): void {
+    this._ready = false;
+    this.hasInitialized = false;
+    if (this.child) {
+      this.child.removeAllListeners("exit");
+      this.child.kill();
+      this.child = null;
+    }
+    if (this.activeSocket) {
+      this.activeSocket.removeAllListeners();
+      this.activeSocket.close();
+      this.activeSocket = null;
+    }
+  }
+
+  /* ---- WebSocket handling ---- */
+
+  private hasInitialized = false;
+
+  private onConnection(socket: WebSocket): void {
+    // Overwrite activeSocket without closing old one. Old socket's close event
+    // fires later, but activeSocket === socket guard makes it a no-op.
+    this.activeSocket = socket;
+    this.activeState = createNdjsonState();
+
+    socket.on("message", (raw) => {
+      const chunk = typeof raw === "string" ? raw : raw.toString();
+      for (const msg of parseNdjsonChunk(this.activeState, chunk)) {
+        this.onMessage(msg);
+      }
+    });
+
+    socket.on("close", () => {
+      if (this.activeSocket === socket) {
+        this.activeSocket = null;
+        this._ready = false;
+        if (!this.stopped && !this.intentionalRestart) {
+          if (this.child) this.child.kill();
+          this.scheduleAutoRestart("socket_closed");
+        }
+      }
+    });
+
+    socket.on("error", (err) => {
+      console.error(`[${this.tag}] Socket error:`, err.message);
+    });
+
+    if (!this.hasInitialized) {
+      // First connection — send initialize with system prompt
+      console.log(`[${this.tag}] Claude connected, initializing`);
+      this._ready = false;
+      this.send(buildInitializeRequest(this.opts.systemPrompt));
+    } else {
+      // WebSocket reconnect — CLI already initialized, just swap socket
+      console.log(`[${this.tag}] Claude reconnected (socket swap)`);
+    }
+  }
+
+  private onMessage(message: Record<string, unknown>): void {
+    const type = String(message.type ?? "unknown");
+
+    // Forward all raw messages as SSE events
+    this.emit("message", message);
+
+    // Initialize acknowledgement
+    if (type === "control_response") {
+      const response = message.response as Record<string, unknown> | undefined;
+      const subtype = String(response?.subtype ?? "");
+      if (subtype === "success") {
+        const inner = response?.response as Record<string, unknown> | undefined;
+        if (inner && ("models" in inner || "commands" in inner)) {
+          this._ready = true;
+          this.hasInitialized = true;
+          this.emit("ready");
+          console.log(`[${this.tag}] Claude ready`);
+        }
+      }
+      return;
+    }
+
+    // Permission requests — auto-allow everything
+    if (type === "control_request") {
+      const request = message.request as Record<string, unknown> | undefined;
+      const subtype = String(request?.subtype ?? "");
+      if (subtype === "can_use_tool") {
+        const requestId = String(message.request_id ?? "");
+        const toolInput = (request?.input ?? request?.tool_input ?? {}) as Record<string, unknown>;
+        this.send(buildPermissionResponse(requestId, "allow", toolInput));
+      }
+      return;
+    }
+
+    // Result — turn complete
+    if (type === "result") {
+      this.emit("result", {
+        sessionId: String(message.session_id ?? ""),
+        totalCostUsd: Number(message.total_cost_usd ?? 0),
+        subtype: String(message.subtype ?? ""),
+        resultText: String(message.result ?? ""),
+        raw: message,
+      } satisfies ResultPayload);
+      return;
+    }
+
+    // Assistant response
+    if (type === "assistant") {
+      const uuid = String(message.uuid ?? "");
+      if (uuid && this.seenUuids.has(uuid)) return;
+      if (uuid) this.seenUuids.add(uuid);
+
+      const fullText = extractAssistantText(message);
+      if (fullText) {
+        this.emit("assistant_text", {
+          text: fullText,
+          fullText,
+          raw: message,
+        } satisfies AssistantTextPayload);
+      }
+      return;
+    }
+  }
+
+  private send(payload: Record<string, unknown>): void {
+    if (!this.activeSocket || this.activeSocket.readyState !== WebSocket.OPEN) {
+      console.warn(`[${this.tag}] No active socket, dropping message`);
+      return;
+    }
+    this.activeSocket.send(encodeNdjson(payload));
+  }
+}
