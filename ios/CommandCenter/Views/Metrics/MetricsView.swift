@@ -13,6 +13,15 @@ struct MetricsView: View {
                 if metricsStore.isLoading && metricsStore.tasks.isEmpty {
                     ProgressView("Loading metrics...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = metricsStore.error, metricsStore.tasks.isEmpty {
+                    ContentUnavailableView {
+                        Label("Load Failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") { Task { await metricsStore.load() } }
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
@@ -62,7 +71,7 @@ struct MetricsView: View {
                         .padding(.vertical)
                     }
                     .refreshable {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticManager.light()
                         await metricsStore.load()
                     }
                 }

@@ -32,6 +32,20 @@ struct ThreadListView: View {
                 if threadStore.isLoadingThreads && threadStore.threads.isEmpty {
                     ProgressView("Loading threads...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = threadStore.error, threadStore.threads.isEmpty {
+                    ContentUnavailableView {
+                        Label("Load Failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") {
+                            Task {
+                                await threadStore.loadThreads()
+                                await boardStore.loadTasks()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 } else if threadStore.threads.isEmpty {
                     ContentUnavailableView("No Threads", systemImage: "bubble.left.and.bubble.right",
                         description: Text("Threads will appear here when agents start working."))
@@ -72,6 +86,7 @@ struct ThreadListView: View {
                         }
                     }
                     .refreshable {
+                        HapticManager.light()
                         await threadStore.loadThreads()
                         await boardStore.loadTasks()
                     }
@@ -96,6 +111,9 @@ struct ThreadListView: View {
             }
             .navigationDestination(for: CCThread.self) { thread in
                 ChatView(threadId: thread.id, threadTitle: thread.title)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                StaleBanner(isStale: threadStore.isStale)
             }
             .task {
                 await threadStore.loadThreads()

@@ -30,5 +30,8 @@ struct MainTabView: View {
                 .tag(NavigationRouter.Tab.metrics)
                 .tabItem { Label("Metrics", systemImage: "chart.bar") }
         }
+        .onChange(of: router.selectedTab) { _, _ in
+            HapticManager.selection()
+        }
     }
 }

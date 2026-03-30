@@ -6,6 +6,7 @@ import SwiftUI
 class TeamStore {
     var agents: [CCAgent] = []
     var isLoading = false
+    var isStale = false
     var error: String?
 
     // KB browsing state
@@ -14,6 +15,7 @@ class TeamStore {
     var isLoadingKB = false
 
     private let api: APIService
+    private static let cacheKey = "agents"
 
     init(api: APIService) {
         self.api = api
@@ -25,7 +27,16 @@ class TeamStore {
         do {
             let response = try await api.fetchAgents()
             agents = response.agents.filter { $0.status != "archived" }
+            isStale = false
+            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+                CacheManager.save(agents, key: Self.cacheKey, projectId: projectId)
+            }
         } catch {
+            if agents.isEmpty, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey),
+               let cached = CacheManager.load([CCAgent].self, key: Self.cacheKey, projectId: projectId) {
+                agents = cached
+                isStale = true
+            }
             self.error = error.localizedDescription
         }
         isLoading = false
