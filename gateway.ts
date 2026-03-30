@@ -12,7 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { URL } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { exec, execFileSync } from "node:child_process";
 import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
@@ -99,6 +99,9 @@ export class Gateway {
   private readonly dataDir: string;
   private readonly configDir: string;
   private readonly port: number;
+  /** Active auth tokens (in-memory). Only used when CC_PASSWORD is set. */
+  private readonly authTokens: Set<string> = new Set();
+  private readonly authPassword: string | undefined = process.env.CC_PASSWORD;
 
   constructor(opts: GatewayOptions) {
     this.port = opts.port;
@@ -454,6 +457,75 @@ export class Gateway {
   }
 
   /* ---------------------------------------------------------------- */
+  /*  Authentication                                                   */
+  /* ---------------------------------------------------------------- */
+
+  /** Returns true if auth is required (CC_PASSWORD is set). */
+  private get authEnabled(): boolean {
+    return !!this.authPassword;
+  }
+
+  /** Extract token from Authorization header or cc-token cookie. */
+  private extractToken(req: http.IncomingMessage): string | null {
+    // Check Authorization: Bearer <token>
+    const authHeader = req.headers["authorization"];
+    if (authHeader?.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+    }
+    // Fallback: check cc-token cookie
+    const cookies = req.headers["cookie"];
+    if (cookies) {
+      const match = cookies.match(/(?:^|;\s*)cc-token=([^\s;]+)/);
+      if (match) return match[1];
+    }
+    return null;
+  }
+
+  /** Check if request is authenticated. Returns true if auth is disabled or token is valid. */
+  private isAuthenticated(req: http.IncomingMessage): boolean {
+    if (!this.authEnabled) return true;
+    const token = this.extractToken(req);
+    return !!token && this.authTokens.has(token);
+  }
+
+  /** Handle POST /api/login */
+  private async handleLogin(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!this.authEnabled) {
+      this.sendJson(res, 200, { token: "none", message: "Auth not enabled" });
+      return;
+    }
+    const body = await this.readBody(req);
+    const { password } = body;
+    if (!password || password !== this.authPassword) {
+      this.sendJson(res, 401, { error: "Invalid password" });
+      return;
+    }
+    const token = randomBytes(32).toString("hex");
+    this.authTokens.add(token);
+    // Set cookie with httpOnly for browser sessions
+    res.setHeader("Set-Cookie", `cc-token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
+    this.sendJson(res, 200, { token });
+  }
+
+  /** Handle GET /api/auth/check */
+  private handleAuthCheck(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.authEnabled) {
+      this.sendJson(res, 200, { authenticated: true, authEnabled: false });
+      return;
+    }
+    const authenticated = this.isAuthenticated(req);
+    this.sendJson(res, authenticated ? 200 : 401, { authenticated, authEnabled: true });
+  }
+
+  /** Handle POST /api/logout */
+  private async handleLogout(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const token = this.extractToken(req);
+    if (token) this.authTokens.delete(token);
+    res.setHeader("Set-Cookie", `cc-token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+    this.sendJson(res, 200, { ok: true });
+  }
+
+  /* ---------------------------------------------------------------- */
   /*  Request router                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -464,6 +536,26 @@ export class Gateway {
     const pathname = parsed.pathname;
 
     try {
+      // --- Auth endpoints (always accessible) ---
+      if (method === "POST" && pathname === "/api/login") {
+        await this.handleLogin(req, res);
+        return;
+      }
+      if (method === "POST" && pathname === "/api/logout") {
+        await this.handleLogout(req, res);
+        return;
+      }
+      if (method === "GET" && pathname === "/api/auth/check") {
+        this.handleAuthCheck(req, res);
+        return;
+      }
+
+      // --- Auth gate: all other /api/* routes require authentication ---
+      if (pathname.startsWith("/api/") && !this.isAuthenticated(req)) {
+        this.sendJson(res, 401, { error: "Authentication required" });
+        return;
+      }
+
       // --- Registry endpoints ---
       if (method === "GET" && pathname === "/api/registry") {
         this.handleRegistryList(res);
