@@ -780,9 +780,9 @@ export class Gateway {
 
   private async handleCreateProject(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await this.readBody(req);
-    const projectName = body.name || body.projectName;
-    let directory: string = body.directory;
-    const captainName: string = body.captainName || "Captain";
+    const projectName = typeof body.name === "string" ? body.name : (typeof body.projectName === "string" ? body.projectName : "");
+    let directory = typeof body.directory === "string" ? body.directory : "";
+    const captainName = typeof body.captainName === "string" && body.captainName ? body.captainName : "Captain";
 
     // Require at least a name or directory
     if (!projectName && !directory) {
@@ -795,6 +795,9 @@ export class Gateway {
       const home = process.env.HOME || "/home/" + (process.env.USER || "user");
       directory = path.join(home, "code", projectName);
     }
+
+    // Ensure project directory exists
+    fs.mkdirSync(directory, { recursive: true });
 
     const dirName = projectName || path.basename(directory.replace(/\/+$/, ""));
     const id = dirName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
