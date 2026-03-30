@@ -1366,6 +1366,29 @@ body {
   padding: 12px;
 }
 
+.cc-load-more-btn {
+  display: block;
+  margin: 0 auto 12px;
+  padding: 6px 16px;
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: 14px;
+  color: var(--cc-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cc-load-more-btn:hover {
+  border-color: var(--cc-accent);
+  color: var(--cc-accent);
+}
+
+.cc-load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Chat Bubbles ─────────────────────────────────────────────── */
 
 .cc-message {
