@@ -154,7 +154,7 @@ struct ThreadListView: View {
             .contentShape(Rectangle())
             .onTapGesture { navigationPath.append(thread) }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 14)
             .overlay(alignment: .bottom) {
                 Divider().padding(.leading, 16)
             }
@@ -166,14 +166,14 @@ struct ThreadRowView: View {
     let thread: CCThread
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "number")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text(thread.title)
                     .font(.body.weight(.medium))
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Spacer()
                 Text(thread.relativeTime)
                     .font(.caption)
@@ -181,7 +181,7 @@ struct ThreadRowView: View {
             }
             if let summary = thread.summary, !summary.isEmpty {
                 Text(summary)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }

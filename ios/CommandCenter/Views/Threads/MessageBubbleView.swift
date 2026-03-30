@@ -25,19 +25,19 @@ struct MessageBubbleView: View {
                 Spacer()
             }
         } else {
-            HStack(alignment: .bottom, spacing: 6) {
+            HStack(alignment: .bottom, spacing: 8) {
                 if !message.isUser {
                     // Agent avatar
                     AgentAvatar(name: message.displaySender)
                 } else {
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 48)
                 }
 
-                VStack(alignment: message.isUser ? .trailing : .leading, spacing: 2) {
+                VStack(alignment: message.isUser ? .trailing : .leading, spacing: 3) {
                     // Sender badge for non-user messages
                     if !message.isUser {
                         Text(message.displaySender)
-                            .font(.caption2.weight(.medium))
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
 
@@ -48,9 +48,9 @@ struct MessageBubbleView: View {
                             if let caption = message.extractCaption, !caption.isEmpty {
                                 MarkdownTextView(caption, foregroundColor: message.isUser ? .white : .primary)
                                     .padding(.horizontal, 14)
-                                    .padding(.vertical, 6)
+                                    .padding(.vertical, 8)
                                     .background(message.isUser ? Color.blue : Color(.systemGray5))
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
                             }
                         }
                     } else {
@@ -68,11 +68,11 @@ struct MessageBubbleView: View {
                 }
 
                 if message.isUser {
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 48)
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
         }
     }
 
@@ -125,9 +125,9 @@ struct AgentAvatar: View {
         ZStack {
             Circle()
                 .fill(Color(.systemGray4))
-                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 32)
             Text(String(name.prefix(1)).uppercased())
-                .font(.caption.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
         }
     }
