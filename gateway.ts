@@ -388,6 +388,7 @@ export class Gateway {
       content: msg.content,
       kind: msg.kind ?? "message",
       source: msg.source,
+      metadata: msg.metadata,
       createdAt: new Date().toISOString(),
     });
 

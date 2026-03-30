@@ -1491,6 +1491,50 @@ body {
   font-size: 11px;
 }
 
+/* ── Chat Images ─────────────────────────────────────────────── */
+
+.cc-chat-image-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cc-chat-image {
+  max-width: 280px;
+  max-height: 200px;
+  border-radius: 6px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 1px solid var(--cc-border);
+  transition: opacity 0.15s;
+}
+.cc-chat-image:hover {
+  opacity: 0.85;
+}
+
+/* ── Image Lightbox ──────────────────────────────────────────── */
+
+.cc-lightbox-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.cc-lightbox-overlay.active {
+  display: flex;
+}
+.cc-lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+
 /* ── Chat Input Bar ───────────────────────────────────────────── */
 
 .cc-chat-input-bar {
