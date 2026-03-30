@@ -7,7 +7,7 @@
 const state = {
   projects: [],
   selectedProjectId: null,
-  activeTab: 'team',
+  activeTab: 'home',
   teamData: [],
   eventSource: null,
   activeThreadId: null,
@@ -31,8 +31,7 @@ const dom = {
   teamCount:          document.getElementById('teamCount'),
   boardColumns:       document.getElementById('boardColumns'),
   boardLastUpdated:   document.getElementById('boardLastUpdated'),
-  opsGrid:            document.getElementById('opsGrid'),
-  opsLastUpdated:     document.getElementById('opsLastUpdated'),
+  dashboardContainer: document.getElementById('dashboardContainer'),
   captainMessage:     document.getElementById('captainMessage'),
   navTabs:            document.querySelectorAll('.cc-nav-tab'),
 };
@@ -246,22 +245,223 @@ function showTab(tabName) {
 
 async function loadTabData(tabName) {
   switch (tabName) {
+    case 'home':
+      await loadDashboardData();
+      break;
     case 'team':
       await loadTeamData();
       break;
     case 'board':
       await loadBoardData();
       break;
-    case 'ops':
-      await loadOpsData();
-      break;
     case 'threads':
       await loadThreadsData();
       break;
-    case 'metrics':
-      await loadMetricsData();
-      break;
   }
+}
+
+// ── Home Tab (Dashboard) ────────────────────────────────────────
+
+async function loadDashboardData() {
+  if (!state.selectedProjectId) return;
+
+  dom.dashboardContainer.innerHTML = `<div class="cc-loading">Loading dashboard...</div>`;
+
+  try {
+    const data = await apiCall('/api/dashboard');
+    const blocks = data.blocks || [];
+    renderDashboard(blocks);
+  } catch {
+    dom.dashboardContainer.innerHTML = `
+      <div class="cc-dashboard-empty">
+        <div class="cc-empty-icon">H</div>
+        <h2>Dashboard</h2>
+        <p>No dashboard configured yet. Captain will populate this once the project is active.</p>
+      </div>
+    `;
+  }
+}
+
+function renderDashboard(blocks) {
+  if (!blocks || blocks.length === 0) {
+    dom.dashboardContainer.innerHTML = `
+      <div class="cc-dashboard-empty">
+        <div class="cc-empty-icon">H</div>
+        <h2>Dashboard</h2>
+        <p>No dashboard content yet.</p>
+      </div>
+    `;
+    return;
+  }
+
+  dom.dashboardContainer.innerHTML = blocks.map(block => renderDashboardBlock(block)).join('');
+}
+
+function renderDashboardBlock(block) {
+  switch (block.type) {
+    case 'hero':    return renderHeroBlock(block);
+    case 'stats':   return renderStatsBlock(block);
+    case 'alert':   return renderAlertBlock(block);
+    case 'activity': return renderActivityBlock(block);
+    case 'list':    return renderListBlock(block);
+    case 'section': return renderSectionBlock(block);
+    case 'agents':  return renderAgentsBlock(block);
+    default:        return '';
+  }
+}
+
+function heroStatusColor(status) {
+  const colors = {
+    healthy: 'var(--cc-green)',
+    warning: 'var(--cc-yellow)',
+    critical: 'var(--cc-red)',
+    info: 'var(--cc-accent)',
+  };
+  return colors[status] || 'var(--cc-accent)';
+}
+
+function renderHeroBlock(block) {
+  const color = heroStatusColor(block.status);
+  return `
+    <div class="cc-dash-hero" style="border-left-color: ${color}">
+      <div class="cc-dash-hero-status" style="color: ${color}">${escapeHtml(block.status || '')}</div>
+      <div class="cc-dash-hero-title">${escapeHtml(block.title || '')}</div>
+      ${block.subtitle ? `<div class="cc-dash-hero-subtitle">${escapeHtml(block.subtitle)}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderStatsBlock(block) {
+  const items = block.items || [];
+  return `
+    <div class="cc-dash-stats">
+      ${items.map(item => {
+        const trend = item.trend;
+        let trendHtml = '';
+        if (trend === 'up') trendHtml = '<span class="cc-dash-stat-trend cc-trend-up">&#9650;</span>';
+        else if (trend === 'down') trendHtml = '<span class="cc-dash-stat-trend cc-trend-down">&#9660;</span>';
+        return `
+          <div class="cc-dash-stat-card">
+            <div class="cc-dash-stat-value">${escapeHtml(String(item.value ?? ''))}</div>
+            <div class="cc-dash-stat-label">${escapeHtml(item.label || '')}${trendHtml}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function alertLevelColor(level) {
+  const colors = {
+    info: 'var(--cc-accent)',
+    warning: 'var(--cc-yellow)',
+    error: 'var(--cc-red)',
+  };
+  return colors[level] || 'var(--cc-accent)';
+}
+
+function alertLevelBg(level) {
+  const bgs = {
+    info: 'var(--cc-accent-bg)',
+    warning: 'var(--cc-yellow-bg)',
+    error: 'var(--cc-red-bg)',
+  };
+  return bgs[level] || 'var(--cc-accent-bg)';
+}
+
+function renderAlertBlock(block) {
+  const color = alertLevelColor(block.level);
+  const bg = alertLevelBg(block.level);
+  return `
+    <div class="cc-dash-alert" style="border-left-color: ${color}; background: ${bg}; color: ${color}">
+      ${block.title ? `<div class="cc-dash-alert-title">${escapeHtml(block.title)}</div>` : ''}
+      <div class="cc-dash-alert-message">${escapeHtml(block.message || '')}</div>
+    </div>
+  `;
+}
+
+function renderActivityBlock(block) {
+  const items = block.items || [];
+  return `
+    <div class="cc-dash-activity">
+      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
+      <div class="cc-dash-activity-list">
+        ${items.map(item => `
+          <div class="cc-dash-activity-item">
+            <span class="cc-dash-activity-dot"></span>
+            <span class="cc-dash-activity-text">${escapeHtml(item.text || '')}</span>
+            ${item.time ? `<span class="cc-dash-activity-time">${escapeHtml(item.time)}</span>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function listItemStateBadge(state) {
+  if (!state) return '';
+  const stateClasses = {
+    created: 'grey', assigned: 'grey', in_progress: 'blue',
+    in_review: 'yellow', qa: 'yellow', blocked: 'red',
+    done: 'green', cancelled: 'grey',
+  };
+  const cls = stateClasses[state] || 'grey';
+  const label = state.replace(/_/g, ' ');
+  return `<span class="cc-task-badge cc-task-badge-${escapeHtml(cls)}">${escapeHtml(label)}</span>`;
+}
+
+function renderListBlock(block) {
+  const items = block.items || [];
+  return `
+    <div class="cc-dash-list">
+      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
+      <div class="cc-dash-list-items">
+        ${items.map(item => `
+          <div class="cc-dash-list-item">
+            <span class="cc-dash-list-item-text">${escapeHtml(item.text || item.title || '')}</span>
+            ${item.state ? listItemStateBadge(item.state) : ''}
+            ${item.assignee ? `<span class="cc-dash-list-assignee">${escapeHtml(item.assignee)}</span>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderSectionBlock(block) {
+  const content = block.content || '';
+  return `
+    <div class="cc-dash-section">
+      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
+      <div class="cc-dash-section-body cc-markdown">${renderMarkdown(content)}</div>
+    </div>
+  `;
+}
+
+function renderAgentsBlock(block) {
+  const agents = block.agents || [];
+  return `
+    <div class="cc-dash-agents">
+      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
+      <div class="cc-dash-agents-grid">
+        ${agents.map(agent => {
+          const initial = (agent.name || agent.id || '?').charAt(0).toUpperCase();
+          const isOnline = agent.status === 'active' || agent.status === 'online';
+          const statusClass = isOnline ? 'cc-status-online' : 'cc-status-offline';
+          return `
+            <div class="cc-dash-agent-card">
+              <div class="cc-avatar cc-avatar-agent" style="width:32px;height:32px;font-size:13px;">${escapeHtml(initial)}</div>
+              <div class="cc-dash-agent-info">
+                <div class="cc-dash-agent-name">${escapeHtml(agent.name || agent.id || '')}</div>
+                ${agent.role ? `<div class="cc-dash-agent-role">${escapeHtml(agent.role)}</div>` : ''}
+              </div>
+              <span class="cc-status-dot ${statusClass}"></span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
 }
 
 // ── Team Tab ─────────────────────────────────────────────────────
@@ -785,165 +985,6 @@ function renderBoardCard(issue) {
       ${assigneesHtml ? `<div class="cc-board-card-footer">${assigneesHtml}</div>` : ''}
     </div>
   `;
-}
-
-// ── Ops Tab ─────────────────────────────────────────────────
-
-async function loadOpsData() {
-  if (!state.selectedProjectId) return;
-
-  dom.opsGrid.innerHTML = `<div class="cc-loading">Loading ops...</div>`;
-
-  try {
-    const data = await apiCall('/api/ops');
-    const runs = data.builds || data.workflow_runs || data.runs || [];
-    const pulls = data.pulls || [];
-    renderOps(runs, pulls);
-    dom.opsLastUpdated.textContent = `Updated ${timeAgo(data.lastUpdated || new Date().toISOString())}`;
-  } catch (err) {
-    console.error('Failed to load ops:', err);
-    renderOps([], []);
-    dom.opsLastUpdated.textContent = 'Unable to load';
-  }
-}
-
-function opsStatusClass(status, conclusion) {
-  if (status === 'in_progress' || status === 'queued' || status === 'pending') return 'cc-status-pending';
-  if (conclusion === 'success') return 'cc-status-success';
-  if (conclusion === 'failure' || conclusion === 'cancelled' || conclusion === 'timed_out') return 'cc-status-failure';
-  return 'cc-status-pending';
-}
-
-function opsStatusLabel(status, conclusion) {
-  if (status === 'in_progress') return 'Running';
-  if (status === 'queued') return 'Queued';
-  if (conclusion === 'success') return 'Passed';
-  if (conclusion === 'failure') return 'Failed';
-  if (conclusion === 'cancelled') return 'Cancelled';
-  if (conclusion === 'timed_out') return 'Timed out';
-  return status || 'Unknown';
-}
-
-function renderOps(runs, pulls = []) {
-  if (runs.length === 0 && pulls.length === 0) {
-    dom.opsGrid.innerHTML = `
-      <div class="cc-team-empty">
-        <p>No workflow runs or pull requests found.</p>
-        <p style="font-size: 12px; color: var(--cc-text-faint);">
-          GitHub data will appear here once the project is connected.
-        </p>
-      </div>
-    `;
-    return;
-  }
-
-  let html = '';
-
-  // CI Runs section
-  if (runs.length > 0) {
-    html += `<div class="cc-ops-section-label" style="grid-column: 1 / -1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cc-text-muted); margin-bottom: 4px;">CI Runs</div>`;
-    html += runs.map(run => {
-      const name = run.name || run.workflow_name || 'Workflow';
-      const status = run.status || '';
-      const conclusion = run.conclusion || '';
-      const statusCls = opsStatusClass(status, conclusion);
-      const statusText = opsStatusLabel(status, conclusion);
-      const updatedAt = run.updated_at || run.updatedAt || run.created_at || run.createdAt;
-      const branch = run.head_branch || run.branch || '';
-      const runNumber = run.run_number || '';
-
-      return `
-        <div class="cc-ops-card">
-          <div class="cc-ops-card-header">
-            <span class="cc-ops-status-dot ${statusCls}"></span>
-            <span class="cc-ops-card-name">${escapeHtml(name)}</span>
-            ${runNumber ? `<span class="cc-ops-run-number">#${escapeHtml(String(runNumber))}</span>` : ''}
-          </div>
-          <div class="cc-ops-card-status ${statusCls}">${escapeHtml(statusText)}</div>
-          <div class="cc-ops-card-meta">
-            ${branch ? `<span class="cc-ops-card-branch">${escapeHtml(branch)}</span>` : ''}
-            ${updatedAt ? `<span class="cc-ops-card-time">${timeAgo(updatedAt)}</span>` : ''}
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  // Pull Requests section
-  if (pulls.length > 0) {
-    html += `<div class="cc-ops-section-label" style="grid-column: 1 / -1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cc-text-muted); margin: 12px 0 4px;">Pull Requests</div>`;
-    html += pulls.map(pr => {
-      const number = pr.number || '';
-      const title = pr.title || 'Untitled PR';
-      const author = pr.author || pr.user?.login || '';
-      const reviewRequests = pr.reviewRequests || pr.requested_reviewers || [];
-      const createdAt = pr.createdAt || pr.created_at;
-      const age = createdAt ? timeAgo(createdAt) : '';
-
-      return `
-        <div class="cc-ops-card">
-          <div class="cc-ops-card-header">
-            <span class="cc-ops-status-dot cc-status-pending"></span>
-            <span class="cc-ops-card-name">${escapeHtml(title)}</span>
-            <span class="cc-ops-run-number">#${escapeHtml(String(number))}</span>
-          </div>
-          <div class="cc-ops-card-meta">
-            ${author ? `<span class="cc-ops-card-branch">${escapeHtml(author)}</span>` : ''}
-            ${reviewRequests.length > 0 ? `<span style="color: var(--cc-text-faint);">Review: ${reviewRequests.map(r => escapeHtml(typeof r === 'string' ? r : r.login || '')).join(', ')}</span>` : ''}
-            ${age ? `<span class="cc-ops-card-time">${age}</span>` : ''}
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  dom.opsGrid.innerHTML = html;
-}
-
-// ── Metrics Tab ─────────────────────────────────────────────────
-
-async function loadMetricsData() {
-  if (!state.selectedProjectId) return;
-
-  const metricsGrid = document.getElementById('metricsGrid');
-  if (!metricsGrid) return;
-
-  metricsGrid.innerHTML = `<div class="cc-loading">Loading metrics...</div>`;
-
-  try {
-    const [taskData, threadsData] = await Promise.allSettled([
-      apiCall('/api/tasks'),
-      apiCall('/api/threads?limit=200'),
-    ]);
-
-    const tasks = taskData.status === 'fulfilled' ? (taskData.value.tasks || []) : [];
-    const threads = threadsData.status === 'fulfilled' ? (threadsData.value.threads || []) : [];
-
-    // Count tasks by state
-    const stateCounts = {};
-    tasks.forEach(t => {
-      stateCounts[t.state] = (stateCounts[t.state] || 0) + 1;
-    });
-
-    const metrics = [
-      { label: 'Total Tasks', value: tasks.length, color: 'var(--cc-accent)' },
-      { label: 'In Progress', value: (stateCounts['in_progress'] || 0) + (stateCounts['assigned'] || 0), color: '#d29922' },
-      { label: 'In Review', value: (stateCounts['in_review'] || 0) + (stateCounts['qa'] || 0), color: 'var(--cc-accent)' },
-      { label: 'Blocked', value: stateCounts['blocked'] || 0, color: '#f85149' },
-      { label: 'Done', value: stateCounts['done'] || 0, color: 'var(--cc-green)' },
-      { label: 'Active Threads', value: threads.filter(t => t.status === 'active').length, color: 'var(--cc-text-muted)' },
-    ];
-
-    metricsGrid.innerHTML = metrics.map(m => `
-      <div class="cc-metric-card">
-        <div class="cc-metric-value" style="color: ${m.color}">${m.value}</div>
-        <div class="cc-metric-label">${escapeHtml(m.label)}</div>
-      </div>
-    `).join('');
-  } catch (err) {
-    console.error('Failed to load metrics:', err);
-    metricsGrid.innerHTML = `<div class="cc-team-empty"><p>Unable to load metrics.</p></div>`;
-  }
 }
 
 // ── Threads Tab ─────────────────────────────────────────────────
@@ -1590,10 +1631,16 @@ function handleSSEEvent(event) {
       break;
     }
 
+    case 'dashboard_update':
+      if (state.activeTab === 'home') {
+        loadDashboardData();
+      }
+      break;
+
     case 'task_created':
     case 'task_updated':
     case 'task_completed':
-      if (state.activeTab === 'board' || state.activeTab === 'metrics') {
+      if (state.activeTab === 'board') {
         loadTabData(state.activeTab);
       }
       // Tasks auto-create threads, so refresh thread list when on threads tab
@@ -1800,9 +1847,9 @@ document.getElementById('chatBtn').addEventListener('click', () => {
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   // Ctrl/Cmd + number to switch tabs
-  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '5') {
+  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '4') {
     e.preventDefault();
-    const tabs = ['team', 'board', 'ops', 'threads', 'metrics'];
+    const tabs = ['home', 'team', 'board', 'threads'];
     const idx = parseInt(e.key, 10) - 1;
     if (tabs[idx] && state.selectedProjectId) {
       showTab(tabs[idx]);
@@ -1815,7 +1862,7 @@ document.addEventListener('keydown', (e) => {
 (async function init() {
   // Restore tab and thread from localStorage before loading projects
   const savedTab = localStorage.getItem('cc-activeTab');
-  if (savedTab && ['team', 'board', 'ops', 'threads', 'metrics'].includes(savedTab)) {
+  if (savedTab && ['home', 'team', 'board', 'threads'].includes(savedTab)) {
     state.activeTab = savedTab;
   }
   const savedThreadId = localStorage.getItem('cc-activeThreadId');
