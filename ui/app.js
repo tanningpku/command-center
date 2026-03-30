@@ -1949,13 +1949,9 @@ function hideShortcutHelp() {
 }
 
 document.addEventListener('keydown', (e) => {
-  // Never intercept when typing in an input
-  if (isInputFocused()) return;
-
-  const now = Date.now();
   const key = e.key;
 
-  // Escape — close modals/panels/help
+  // Escape always works — even when input is focused or help overlay is open
   if (key === 'Escape') {
     const helpOverlay = document.getElementById('shortcutHelpOverlay');
     if (helpOverlay && helpOverlay.style.display !== 'none') {
@@ -1968,6 +1964,15 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
+
+  // All other shortcuts: skip when typing in an input
+  if (isInputFocused()) return;
+
+  // Skip shortcuts when help overlay is visible
+  const helpOverlay = document.getElementById('shortcutHelpOverlay');
+  if (helpOverlay && helpOverlay.style.display !== 'none') return;
+
+  const now = Date.now();
 
   // ? — show shortcut help
   if (key === '?') {
