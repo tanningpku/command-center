@@ -104,4 +104,5 @@ struct ParticipantsResponse: Codable {
 struct SendMessageResponse: Codable {
     let ok: Bool?
     let accepted: Bool?
+    let paths: [String]?
 }

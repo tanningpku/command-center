@@ -242,10 +242,20 @@ struct ChatView: View {
                 isUploading = true
                 defer { isUploading = false }
                 do {
-                    _ = try await api.uploadImage(
+                    let result = try await api.uploadImage(
                         imageData: imageData, fileName: "screenshot.jpg",
                         caption: text.isEmpty ? nil : text, threadId: threadId
                     )
+                    // Add optimistic local message with image paths
+                    let jpgPaths = (result.paths ?? []).filter { $0.hasSuffix(".jpg") || $0.hasSuffix(".jpeg") || $0.hasSuffix(".png") }
+                    if !jpgPaths.isEmpty {
+                        let content = "[image: \(jpgPaths.joined(separator: ", "))]"
+                        let local = CCMessage(
+                            threadId: threadId, role: "user", content: content,
+                            sender: "user", source: "upload"
+                        )
+                        threadStore.messages.append(local)
+                    }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 } catch {
                     speechService.error = "Upload failed: \(error.localizedDescription)"
