@@ -6,6 +6,8 @@ struct CommandCenterApp: App {
     @State private var sseService = SSEService()
     @State private var projectStore: ProjectStore
     @State private var threadStore: ThreadStore
+    @State private var teamStore: TeamStore
+    @State private var boardStore: BoardStore
     @State private var router = NavigationRouter()
 
     init() {
@@ -16,6 +18,8 @@ struct CommandCenterApp: App {
         self.sseService = sse
         self.projectStore = ProjectStore(api: api)
         self.threadStore = ThreadStore(api: api, sseService: sse)
+        self.teamStore = TeamStore(api: api)
+        self.boardStore = BoardStore(api: api)
     }
 
     var body: some Scene {
@@ -23,14 +27,28 @@ struct CommandCenterApp: App {
             ContentView()
                 .environment(projectStore)
                 .environment(threadStore)
+                .environment(teamStore)
+                .environment(boardStore)
                 .environment(router)
-                .task { await projectStore.load() }
+                .task {
+                    await projectStore.load()
+                    wireSSEEvents()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in
                     reconnectSSE()
                 }
                 .onChange(of: projectStore.selectedId) { _, newId in
                     if newId != nil { reconnectSSE() }
                 }
+        }
+    }
+
+    private func wireSSEEvents() {
+        threadStore.onAgentEvent = { type, payload in
+            teamStore.handleAgentEvent(type: type, payload: payload)
+        }
+        threadStore.onTaskEvent = { type, payload in
+            boardStore.handleTaskEvent(type: type, payload: payload)
         }
     }
 
