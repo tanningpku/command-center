@@ -74,6 +74,7 @@ struct CommandCenterApp: App {
 struct ContentView: View {
     @Environment(ProjectStore.self) var projectStore
     @State private var showSettings = false
+    @State private var showScreenshotShare = false
 
     var body: some View {
         ZStack {
@@ -105,5 +106,15 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            // Brief delay to let the system save the screenshot to photo library
+            Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                showScreenshotShare = true
+            }
+        }
+        .sheet(isPresented: $showScreenshotShare) {
+            ScreenshotShareView()
+        }
     }
 }
