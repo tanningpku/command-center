@@ -64,8 +64,19 @@ cd "$PROJECT_DIR"
 if [ "$DEV_MODE" = "true" ]; then
   CMD="npx tsx index.ts"
 else
-  # Auto-build if dist is missing or stale
-  if [ ! -f dist/index.js ] || [ gateway.ts -nt dist/index.js ] || [ index.ts -nt dist/index.js ]; then
+  # Auto-build if dist is missing or any TS source is newer
+  NEEDS_BUILD=false
+  if [ ! -f dist/index.js ]; then
+    NEEDS_BUILD=true
+  else
+    for src in *.ts; do
+      if [ "$src" -nt dist/index.js ]; then
+        NEEDS_BUILD=true
+        break
+      fi
+    done
+  fi
+  if [ "$NEEDS_BUILD" = "true" ]; then
     log "Building TypeScript..."
     npm run build || { log "Build failed"; exit 1; }
   fi
