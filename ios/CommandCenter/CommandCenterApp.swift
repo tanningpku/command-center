@@ -71,10 +71,9 @@ struct ContentView: View {
     @State private var showSettings = false
 
     var body: some View {
-        Group {
+        ZStack {
             if projectStore.isLoading && projectStore.projects.isEmpty {
                 ProgressView("Connecting to Command Center...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = projectStore.error, projectStore.projects.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "wifi.exclamationmark")
@@ -100,5 +99,6 @@ struct ContentView: View {
                 MainTabView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
