@@ -106,26 +106,31 @@ while true; do
 
   ELAPSED=$(( $(date +%s) - START_TIME ))
 
-  # Reset backoff only if process ran long enough AND exited cleanly
-  if [ "$ELAPSED" -ge "$HEALTHY_THRESHOLD" ] && [ "$EXIT_CODE" -eq 0 ]; then
+  # Classify the exit and adjust backoff/restart state
+  if [ "$ELAPSED" -ge "$HEALTHY_THRESHOLD" ]; then
+    # Ran long enough — consider it a healthy period, reset state
     BACKOFF="$BACKOFF_INITIAL"
     RESTART_COUNT=0
-    log "Process exited cleanly after ${ELAPSED}s. Restarting in ${BACKOFF}s..."
-  else
+    log "Process exited (code $EXIT_CODE) after ${ELAPSED}s (healthy). Restarting in ${BACKOFF}s..."
+  elif [ "$EXIT_CODE" -ne 0 ]; then
+    # Quick crash — count toward restart limit, increase backoff
     RESTART_COUNT=$(( RESTART_COUNT + 1 ))
-    log "Process exited (code $EXIT_CODE) after ${ELAPSED}s. Restart #$RESTART_COUNT in ${BACKOFF}s..."
+    log "Process crashed (code $EXIT_CODE) after ${ELAPSED}s. Restart #$RESTART_COUNT in ${BACKOFF}s..."
+  else
+    # Quick clean exit — restart but don't escalate
+    log "Process exited cleanly after ${ELAPSED}s. Restarting in ${BACKOFF}s..."
   fi
 
   sleep "$BACKOFF"
 
-  # Check max restarts (after sleep, before next launch)
+  # Check max consecutive crashes (after sleep, before next launch)
   if [ "$MAX_RESTARTS" -gt 0 ] && [ "$RESTART_COUNT" -ge "$MAX_RESTARTS" ]; then
-    log "Reached max restarts ($MAX_RESTARTS). Giving up."
+    log "Reached max consecutive crashes ($MAX_RESTARTS). Giving up."
     exit 1
   fi
 
-  # Exponential backoff on failure (double, cap at max); clean healthy exits stay at initial
-  if [ "$RESTART_COUNT" -gt 0 ]; then
+  # Exponential backoff after crashes only
+  if [ "$EXIT_CODE" -ne 0 ] && [ "$ELAPSED" -lt "$HEALTHY_THRESHOLD" ]; then
     BACKOFF=$(( BACKOFF * 2 ))
     if [ "$BACKOFF" -gt "$BACKOFF_MAX" ]; then
       BACKOFF="$BACKOFF_MAX"
