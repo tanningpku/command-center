@@ -93,14 +93,14 @@ actor APIService {
         return try await fetch("api/threads/\(threadId)/messages", query: query)
     }
 
-    func sendMessage(threadId: String, text: String, sender: String = "user") async throws -> SendMessageResponse {
+    func sendMessage(threadId: String, text: String, sender: String = "user", source: String = "ios") async throws -> SendMessageResponse {
         struct Body: Encodable {
             let thread_id: String
             let text: String
             let sender: String
             let source: String
         }
-        return try await post("api/message", body: Body(thread_id: threadId, text: text, sender: sender, source: "ios"))
+        return try await post("api/message", body: Body(thread_id: threadId, text: text, sender: sender, source: source))
     }
 
     func createThread(title: String, participants: [[String: String]] = []) async throws -> CCThread {
@@ -167,7 +167,10 @@ actor APIService {
 
     func uploadImage(imageData: Data, fileName: String, caption: String?, threadId: String, sender: String = "user") async throws -> SendMessageResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
-        var req = URLRequest(url: baseURL.appendingPathComponent("api/message/image"))
+        // Backend reads threadId from query params
+        var components = URLComponents(url: baseURL.appendingPathComponent("api/message/image"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "threadId", value: threadId)]
+        var req = URLRequest(url: components.url!)
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         if let projectId { req.setValue(projectId, forHTTPHeaderField: "X-Project-Id") }

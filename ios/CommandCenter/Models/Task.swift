@@ -33,12 +33,13 @@ enum TaskState: String, Codable, CaseIterable {
 }
 
 enum TaskPriority: String, Codable, Comparable {
-    case critical, high, normal, low
+    case critical, high, medium, normal, low
 
     var color: Color {
         switch self {
         case .critical: .red
         case .high: .orange
+        case .medium: .yellow
         case .normal: .blue
         case .low: .gray
         }
@@ -48,8 +49,9 @@ enum TaskPriority: String, Codable, Comparable {
         switch self {
         case .critical: 0
         case .high: 1
-        case .normal: 2
-        case .low: 3
+        case .medium: 2
+        case .normal: 3
+        case .low: 4
         }
     }
 

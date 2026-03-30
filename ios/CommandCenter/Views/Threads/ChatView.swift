@@ -14,6 +14,7 @@ struct ChatView: View {
     @StateObject private var speechService = SpeechService()
     @State private var voiceState: VoiceState = .idle
     @State private var apiService: APIService?
+    @AppStorage("voiceModeEnabled") private var voiceModeEnabled = false
 
     // Image draft
     @State private var selectedPhoto: PhotosPickerItem?
@@ -42,6 +43,12 @@ struct ChatView: View {
                     .onAppear { scrollProxy = proxy }
                     .onChange(of: threadStore.messages.count) {
                         scrollToBottom(proxy: proxy)
+                    }
+                    .onTapGesture {
+                        // Voice mode: tap anywhere to start recording
+                        if voiceModeEnabled && voiceState == .idle {
+                            startRecording()
+                        }
                     }
                 }
 
@@ -76,6 +83,19 @@ struct ChatView: View {
                     .background(Color(.systemGray6))
                 }
 
+                // Voice mode indicator
+                if voiceModeEnabled && voiceState == .idle {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mic.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        Text("Voice mode — tap anywhere to record")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
                 // Input bar
                 chatInputBar
             }
@@ -87,6 +107,20 @@ struct ChatView: View {
         }
         .navigationTitle(threadTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    voiceModeEnabled.toggle()
+                    if voiceModeEnabled {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                } label: {
+                    Image(systemName: voiceModeEnabled ? "mic.fill" : "mic.slash")
+                        .font(.body)
+                        .foregroundStyle(voiceModeEnabled ? .red : .secondary)
+                }
+            }
+        }
         .task {
             await threadStore.loadMessages(threadId: threadId)
             // Scroll to bottom after initial load
@@ -135,7 +169,7 @@ struct ChatView: View {
                         .foregroundStyle(.blue)
                 }
                 .disabled(isUploading)
-            } else {
+            } else if !voiceModeEnabled {
                 Button { toggleVoice() } label: {
                     Image(systemName: voiceState == .transcribing ? "ellipsis.circle" : "mic.circle.fill")
                         .font(.title2)
@@ -145,7 +179,7 @@ struct ChatView: View {
                 .disabled(voiceState == .transcribing)
             }
 
-            if isUploading {
+            if isUploading || voiceState == .transcribing {
                 ProgressView()
                     .scaleEffect(0.8)
             }
@@ -273,7 +307,7 @@ struct ChatView: View {
                 let result = try await api.transcribeAudio(fileURL: url)
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
-                    await threadStore.sendMessage(text: text, threadId: threadId)
+                    await threadStore.sendMessage(text: text, threadId: threadId, source: "ios-voice")
                     if let proxy = scrollProxy { scrollToBottom(proxy: proxy) }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }

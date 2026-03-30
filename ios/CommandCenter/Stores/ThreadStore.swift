@@ -59,21 +59,21 @@ class ThreadStore {
     }
 
     /// Send a message with optimistic UI update.
-    func sendMessage(text: String, threadId: String) async {
+    func sendMessage(text: String, threadId: String, source: String = "ios") async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         // Optimistic append
         let local = CCMessage(
             threadId: threadId, role: "user", content: trimmed,
-            sender: "user", source: "ios"
+            sender: "user", source: source
         )
         messages.append(local)
         seenContentHashes.insert(local.contentHash)
 
         // Send to gateway
         do {
-            _ = try await api.sendMessage(threadId: threadId, text: trimmed)
+            _ = try await api.sendMessage(threadId: threadId, text: trimmed, source: source)
         } catch {
             self.error = "Send failed: \(error.localizedDescription)"
         }
