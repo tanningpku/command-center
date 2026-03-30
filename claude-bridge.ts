@@ -132,14 +132,15 @@ export class ClaudeBridge extends EventEmitter {
   private static readonly MAX_BACKOFF_MS = 60_000;
 
   /* ---- Watchdog state ---- */
+  /** Timestamp of most recent activity (SDK message, stdout, stderr) */
   private lastActivityAt = Date.now();
+  /** Timestamp of most recent user message sent to bridge */
   private lastUserMessageAt = 0;
-  private pendingResponse = false;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
-  /** Timeout in ms before considering a bridge stuck (default: 90s) */
-  static readonly STUCK_TIMEOUT_MS = 90_000;
-  /** How often the watchdog checks for stuck bridges (default: 15s) */
-  private static readonly WATCHDOG_INTERVAL_MS = 15_000;
+  /** Timeout in ms with no activity after sending a message before considering stuck (default: 3min) */
+  static readonly STUCK_TIMEOUT_MS = 180_000;
+  /** How often the watchdog checks for stuck bridges (default: 30s) */
+  private static readonly WATCHDOG_INTERVAL_MS = 30_000;
 
   /** The thread that the most recent user message was sent in. */
   activeThreadId = "main";
@@ -197,7 +198,6 @@ export class ClaudeBridge extends EventEmitter {
     parts.push(`${sender ?? "User"}: ${text}`);
     this.send(buildUserMessage(parts.join("\n")));
     this.lastUserMessageAt = Date.now();
-    this.pendingResponse = true;
   }
 
   /* ---- Child process management ---- */
@@ -222,11 +222,13 @@ export class ClaudeBridge extends EventEmitter {
     this.child = child;
 
     child.stdout?.on("data", (data: Buffer) => {
+      this.lastActivityAt = Date.now();
       for (const line of data.toString().trim().split("\n")) {
         console.log(`[${this.tag}:out] ${line}`);
       }
     });
     child.stderr?.on("data", (data: Buffer) => {
+      this.lastActivityAt = Date.now();
       for (const line of data.toString().trim().split("\n")) {
         console.error(`[${this.tag}:err] ${line}`);
       }
@@ -360,7 +362,6 @@ export class ClaudeBridge extends EventEmitter {
 
     // Result — turn complete
     if (type === "result") {
-      this.pendingResponse = false;
       this.emit("result", {
         sessionId: String(message.session_id ?? ""),
         totalCostUsd: Number(message.total_cost_usd ?? 0),
@@ -412,25 +413,25 @@ export class ClaudeBridge extends EventEmitter {
   }
 
   private checkStuck(): void {
-    if (this.stopped || !this.pendingResponse || this.autoRestartPending) return;
+    if (this.stopped || this.autoRestartPending) return;
+    // Only check if we've actually sent a message (agent is expected to be working)
+    if (this.lastUserMessageAt === 0) return;
 
-    const elapsed = Date.now() - this.lastUserMessageAt;
-    const sinceActivity = Date.now() - this.lastActivityAt;
+    const now = Date.now();
+    const sinceActivity = now - this.lastActivityAt;
 
-    // Only consider stuck if: we're waiting for a response AND
-    // no activity at all since the message was sent AND timeout exceeded
-    if (elapsed < ClaudeBridge.STUCK_TIMEOUT_MS) return;
-    if (this.lastActivityAt > this.lastUserMessageAt) return; // got activity after our message — not stuck
+    // Not stuck if there's been recent activity (SDK messages, stdout, stderr)
+    if (sinceActivity < ClaudeBridge.STUCK_TIMEOUT_MS) return;
 
     console.warn(
-      `[${this.tag}] WATCHDOG: Bridge appears stuck — no activity for ${Math.round(sinceActivity / 1000)}s ` +
-      `after user message sent ${Math.round(elapsed / 1000)}s ago. Killing subprocess.`,
+      `[${this.tag}] WATCHDOG: Bridge appears stuck — no activity (SDK, stdout, stderr) ` +
+      `for ${Math.round(sinceActivity / 1000)}s. Killing subprocess.`,
     );
 
-    this.pendingResponse = false;
+    // Reset so we don't fire again immediately on restart
+    this.lastUserMessageAt = 0;
     this.emit("watchdog_kill", {
       agentId: this.opts.agentId ?? "captain",
-      elapsedMs: elapsed,
       sinceActivityMs: sinceActivity,
     });
     this.scheduleAutoRestart("watchdog_stuck");
