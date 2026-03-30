@@ -57,6 +57,12 @@ class ThreadStore {
         isLoadingThreads = false
     }
 
+    func createThread(title: String, participants: [[String: String]] = []) async throws -> CCThread {
+        let thread = try await api.createThread(title: title, participants: participants)
+        await loadThreads()
+        return thread
+    }
+
     // MARK: - Messages
 
     func loadMessages(threadId: String) async {
