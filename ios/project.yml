@@ -35,6 +35,23 @@ targets:
         ENABLE_PREVIEWS: "YES"
     info:
       path: CommandCenter/Info.plist
+      properties:
+        CFBundleDisplayName: Command Center
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities:
+          - arm64
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSMicrophoneUsageDescription: "Command Center uses the microphone for voice input."
+        NSPhotoLibraryUsageDescription: "Command Center uses your photo library to share images."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
     scheme:
       testTargets: []
       gatherCoverageData: false
