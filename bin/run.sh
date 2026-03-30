@@ -106,14 +106,14 @@ while true; do
 
   ELAPSED=$(( $(date +%s) - START_TIME ))
 
-  # If the process ran long enough, it was healthy — reset backoff
-  if [ "$ELAPSED" -ge "$HEALTHY_THRESHOLD" ]; then
+  # Reset backoff only if process ran long enough AND exited cleanly
+  if [ "$ELAPSED" -ge "$HEALTHY_THRESHOLD" ] && [ "$EXIT_CODE" -eq 0 ]; then
     BACKOFF="$BACKOFF_INITIAL"
     RESTART_COUNT=0
-    log "Process exited (code $EXIT_CODE) after ${ELAPSED}s (was healthy). Restarting in ${BACKOFF}s..."
+    log "Process exited cleanly after ${ELAPSED}s. Restarting in ${BACKOFF}s..."
   else
     RESTART_COUNT=$(( RESTART_COUNT + 1 ))
-    log "Process crashed (code $EXIT_CODE) after ${ELAPSED}s. Restart #$RESTART_COUNT in ${BACKOFF}s..."
+    log "Process exited (code $EXIT_CODE) after ${ELAPSED}s. Restart #$RESTART_COUNT in ${BACKOFF}s..."
   fi
 
   sleep "$BACKOFF"
@@ -124,8 +124,8 @@ while true; do
     exit 1
   fi
 
-  # Exponential backoff on crash only (double, cap at max); healthy exits stay at initial
-  if [ "$ELAPSED" -lt "$HEALTHY_THRESHOLD" ]; then
+  # Exponential backoff on failure (double, cap at max); clean healthy exits stay at initial
+  if [ "$RESTART_COUNT" -gt 0 ]; then
     BACKOFF=$(( BACKOFF * 2 ))
     if [ "$BACKOFF" -gt "$BACKOFF_MAX" ]; then
       BACKOFF="$BACKOFF_MAX"
