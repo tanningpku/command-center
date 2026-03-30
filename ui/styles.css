@@ -309,16 +309,15 @@ body {
 #tab-threads {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--cc-header-h) - var(--cc-captain-h) - 56px);
-}
-
-#tab-threads .cc-tab-header {
-  flex-shrink: 0;
+  height: calc(100vh - var(--cc-header-h) - var(--cc-captain-h));
+  margin: -28px -36px;
 }
 
 #tab-threads .cc-threads-split {
   flex: 1;
-  height: auto;
+  min-height: 0;
+  border-radius: 0;
+  border: none;
 }
 
 @keyframes cc-fadeIn {
@@ -907,6 +906,11 @@ body {
     padding: 20px 24px;
   }
 
+  #tab-threads {
+    margin: -20px -24px;
+    height: calc(100vh - var(--cc-header-h) - var(--cc-captain-h));
+  }
+
   .cc-team-grid {
     grid-template-columns: 1fr;
   }
@@ -1129,9 +1133,45 @@ body {
   border-right: 1px solid var(--cc-border);
   overflow-y: auto;
   background: var(--cc-surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.cc-thread-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cc-border);
+  flex-shrink: 0;
+}
+
+.cc-thread-sidebar-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--cc-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cc-thread-sidebar-header .cc-header-btn {
+  margin-left: auto;
+}
+
+.cc-badge-sm {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.cc-btn-sm {
+  font-size: 13px;
+  padding: 0px 7px;
+  line-height: 1.2;
 }
 
 .cc-thread-list {
+  flex: 1;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0;

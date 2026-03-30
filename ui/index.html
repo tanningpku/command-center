@@ -121,14 +121,14 @@
 
       <!-- Threads tab -->
       <div id="tab-threads" class="cc-tab-content" style="display: none">
-        <div class="cc-tab-header">
-          <h2>Workstream Threads</h2>
-          <span id="threadCount" class="cc-badge"></span>
-          <button id="newThreadBtn" class="cc-header-btn" title="New Thread">+</button>
-        </div>
         <div class="cc-threads-split">
           <!-- Left: thread sidebar -->
           <div id="threadSidebar" class="cc-thread-sidebar">
+            <div class="cc-thread-sidebar-header">
+              <span class="cc-thread-sidebar-title">Threads</span>
+              <span id="threadCount" class="cc-badge cc-badge-sm"></span>
+              <button id="newThreadBtn" class="cc-header-btn cc-btn-sm" title="New Thread">+</button>
+            </div>
             <div id="threadList" class="cc-thread-list"></div>
           </div>
           <!-- Right: chat area -->
