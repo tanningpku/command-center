@@ -1489,13 +1489,28 @@ export class Gateway {
       return;
     }
 
+    // Separate text fields from file parts
+    const fields: Record<string, string> = {};
+    const fileParts: typeof parts = [];
+    for (const part of parts) {
+      if (part.filename) {
+        fileParts.push(part);
+      } else {
+        fields[part.fieldName] = part.data.toString("utf-8");
+      }
+    }
+
+    if (!fileParts.length) {
+      this.sendJson(res, 400, { error: "No file uploaded. Send multipart/form-data with an image field." });
+      return;
+    }
+
     const uploadsDir = path.join(this.dataDir, "uploads");
     fs.mkdirSync(uploadsDir, { recursive: true });
 
     const savedPaths: string[] = [];
-    for (const part of parts) {
+    for (const part of fileParts) {
       if (!part.data.length) continue;
-      // Derive extension from filename or content-type
       let ext = ".bin";
       if (part.filename) {
         const dotIdx = part.filename.lastIndexOf(".");
@@ -1516,17 +1531,17 @@ export class Gateway {
     }
 
     // Post a message with image paths in metadata if thread_id provided
-    const threadId = parsed.searchParams.get("thread_id") ?? parsed.searchParams.get("threadId") ?? undefined;
+    const threadId = parsed.searchParams.get("thread_id") ?? parsed.searchParams.get("threadId") ?? fields["threadId"] ?? undefined;
     if (threadId) {
-      const sender = req.headers["x-user-id"] as string | undefined;
+      const sender = fields["sender"] ?? req.headers["x-user-id"] as string | undefined ?? "user";
       this.dispatchMessage({
         projectId,
         threadId,
-        sender: { id: sender ?? "user", type: "user" },
+        sender: { id: sender, type: "user" },
         channel: "thread",
         mode: "text",
         content: `[image: ${savedPaths.join(", ")}]`,
-        source: "upload",
+        source: fields["source"] ?? "upload",
         metadata: { imagePaths: savedPaths },
       });
     }
