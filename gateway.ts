@@ -382,7 +382,8 @@ export class Gateway {
     // 2. Broadcast to UI via SSE
     this.sseHub.publish(msg.projectId, "thread_message", {
       threadId: msg.threadId,
-      sender: msg.sender,
+      role: msg.sender.type === "user" ? "user" : "assistant",
+      sender: msg.sender.id,
       channel: msg.channel,
       mode: msg.mode,
       content: msg.content,
