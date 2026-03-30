@@ -87,7 +87,7 @@ actor APIService {
         try await fetch("api/threads")
     }
 
-    func fetchMessages(threadId: String, limit: Int = 50, before: String? = nil) async throws -> ThreadMessagesResponse {
+    func fetchMessages(threadId: String, limit: Int = 200, before: String? = nil) async throws -> ThreadMessagesResponse {
         var query: [(String, String)] = [("limit", String(limit))]
         if let before { query.append(("before", before)) }
         return try await fetch("api/threads/\(threadId)/messages", query: query)
