@@ -423,8 +423,7 @@ case "${1:-help}" in
     done
 
     echo "[cc] Starting iOS build via SSH..."
-    BUILD_OUTPUT=$("$DIR/bin/ios-build.sh" $BUILD_ARGS 2>&1) || true
-    BUILD_EXIT=$?
+    BUILD_OUTPUT=$("$DIR/bin/ios-build.sh" $BUILD_ARGS 2>&1) && BUILD_EXIT=0 || BUILD_EXIT=$?
 
     echo "$BUILD_OUTPUT"
 
