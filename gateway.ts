@@ -285,6 +285,15 @@ export class Gateway {
       });
     });
 
+    bridge.on("watchdog_kill", (info: { agentId: string; sinceActivityMs: number }) => {
+      console.warn(`[gateway] Watchdog killed bridge for ${projectId}/${info.agentId} (no activity for ${Math.round(info.sinceActivityMs / 1000)}s)`);
+      this.sseHub.publish(projectId, "bridge_watchdog_kill", {
+        agentId: info.agentId,
+        sinceActivityMs: info.sinceActivityMs,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
     this.claudeBridges.set(compositeKey, bridge);
     await bridge.start();
     return bridge;
