@@ -12,7 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { URL } from "node:url";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, exec, type ChildProcess } from "node:child_process";
 import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
 import { AgentStore } from "./agent-store.js";
@@ -30,6 +30,7 @@ export interface ProjectConfig {
   port: number;
   repo: string;
   status: "active" | "inactive";
+  directory?: string;
 }
 
 export interface GatewayOptions {
@@ -265,6 +266,16 @@ export class Gateway {
         } else if (pathname === "/api/pulls") {
           this.sendJson(res, 200, { pulls: ghPlugin.getPulls(), lastUpdated: new Date().toISOString() });
         }
+        return;
+      }
+
+      // --- Harness exec endpoint ---
+      if (method === "POST" && pathname === "/api/harness/exec") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const project = this.projects.get(projectId);
+        if (!project) { this.sendJson(res, 404, { error: `Unknown project: ${projectId}` }); return; }
+        await this.handleHarnessExec(req, res, project);
         return;
       }
 
@@ -724,6 +735,68 @@ export class Gateway {
     return synced;
   }
 
+  /* ---------------------------------------------------------------- */
+  /*  Harness exec                                                     */
+  /* ---------------------------------------------------------------- */
+
+  private async handleHarnessExec(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    project: ProjectConfig,
+  ): Promise<void> {
+    const body = await this.readBody(req);
+    const { command, cwd, timeout } = body;
+
+    if (!command || typeof command !== "string") {
+      this.sendJson(res, 400, { error: "command is required (string)" });
+      return;
+    }
+
+    // Resolve working directory: explicit cwd > project directory > gateway data dir
+    const projectDir = project.directory || this.dataDir;
+    let execCwd = typeof cwd === "string" && cwd.length > 0 ? cwd : projectDir;
+
+    // Resolve to absolute path
+    execCwd = path.resolve(execCwd);
+
+    // Verify the directory exists
+    try {
+      const stat = fs.statSync(execCwd);
+      if (!stat.isDirectory()) {
+        this.sendJson(res, 400, { error: `cwd is not a directory: ${execCwd}` });
+        return;
+      }
+    } catch {
+      this.sendJson(res, 400, { error: `cwd does not exist: ${execCwd}` });
+      return;
+    }
+
+    // Timeout: default 120s, max 600s
+    const execTimeout = Math.min(
+      typeof timeout === "number" && timeout > 0 ? timeout * 1000 : 120_000,
+      600_000,
+    );
+
+    console.log(`[harness] exec for ${project.id}: ${command.slice(0, 200)}${command.length > 200 ? "..." : ""} (cwd: ${execCwd})`);
+
+    try {
+      const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+        exec(command, {
+          cwd: execCwd,
+          timeout: execTimeout,
+          maxBuffer: 10 * 1024 * 1024, // 10MB
+          env: { ...process.env, FORCE_COLOR: "0" },
+        }, (error, stdout, stderr) => {
+          const exitCode = error ? (error as any).code ?? 1 : 0;
+          resolve({ stdout, stderr, exitCode: typeof exitCode === "number" ? exitCode : 1 });
+        });
+      });
+      this.sendJson(res, 200, result);
+    } catch (err) {
+      this.sendJson(res, 500, { error: `Execution failed: ${(err as Error).message}` });
+    }
+  }
+
   private async readBody(req: http.IncomingMessage): Promise<Record<string, any>> {
     return new Promise((resolve) => {
       let data = "";
@@ -777,13 +850,14 @@ export function loadProjectConfigs(dir: string): ProjectConfig[] {
     const port = Number(config.port);
     const repo = config.repo ?? "";
     const status = config.status === "inactive" ? "inactive" : "active";
+    const directory = config.directory || undefined;
 
     if (!port || isNaN(port)) {
       console.warn(`[gateway] Skipping ${entry.name}: missing or invalid port`);
       continue;
     }
 
-    projects.push({ id, name, port, repo, status });
+    projects.push({ id, name, port, repo, status, directory });
   }
 
   return projects;
