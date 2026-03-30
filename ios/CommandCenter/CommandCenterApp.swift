@@ -1,0 +1,74 @@
+import SwiftUI
+
+@main
+struct CommandCenterApp: App {
+    @State private var apiService: APIService
+    @State private var sseService = SSEService()
+    @State private var projectStore: ProjectStore
+    @State private var threadStore: ThreadStore
+    @State private var router = NavigationRouter()
+
+    init() {
+        let baseURL = AppConfig.baseURL ?? URL(string: AppConfig.defaultBaseURL)!
+        let api = APIService(baseURL: baseURL)
+        let sse = SSEService()
+        self.apiService = api
+        self.sseService = sse
+        self.projectStore = ProjectStore(api: api)
+        self.threadStore = ThreadStore(api: api, sseService: sse)
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environment(projectStore)
+                .environment(threadStore)
+                .environment(router)
+                .task { await projectStore.load() }
+                .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in
+                    reconnectSSE()
+                }
+                .onChange(of: projectStore.selectedId) { _, newId in
+                    if newId != nil { reconnectSSE() }
+                }
+        }
+    }
+
+    private func reconnectSSE() {
+        guard let projectId = projectStore.selectedId,
+              let baseURL = AppConfig.baseURL else { return }
+        threadStore.connectSSE(baseURL: baseURL, projectId: projectId)
+    }
+}
+
+/// Root content view that shows either a loading/setup state or the main tab view.
+struct ContentView: View {
+    @Environment(ProjectStore.self) var projectStore
+
+    var body: some View {
+        Group {
+            if projectStore.isLoading && projectStore.projects.isEmpty {
+                ProgressView("Connecting to Command Center...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = projectStore.error, projectStore.projects.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.secondary)
+                    Text("Connection Error")
+                        .font(.title2.bold())
+                    Text(error)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
+                        Task { await projectStore.load() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+            } else {
+                MainTabView()
+            }
+        }
+    }
+}
