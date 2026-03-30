@@ -15,6 +15,7 @@ const state = {
   tasksByThreadId: {},
   agentDetailId: null,       // Currently open agent detail panel
   agentDetailTab: 'instruction', // 'instruction' or 'kb'
+  unreadThreads: {},         // threadId → true if has unread messages
 };
 
 // ── DOM References ───────────────────────────────────────────────
@@ -39,6 +40,37 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = String(str);
   return div.innerHTML;
+}
+
+// ── Unread tracking ─────────────────────────────────────────────
+
+function getLastReadKey() {
+  return `cc-lastRead-${state.selectedProjectId || 'default'}`;
+}
+
+function getLastReadMap() {
+  try {
+    return JSON.parse(localStorage.getItem(getLastReadKey()) || '{}');
+  } catch { return {}; }
+}
+
+function markThreadRead(threadId) {
+  const map = getLastReadMap();
+  map[threadId] = new Date().toISOString();
+  localStorage.setItem(getLastReadKey(), JSON.stringify(map));
+  delete state.unreadThreads[threadId];
+}
+
+function computeUnreadState(threads) {
+  const map = getLastReadMap();
+  state.unreadThreads = {};
+  for (const t of threads) {
+    if (t.id === state.activeThreadId) continue;
+    const lastRead = map[t.id];
+    if (!lastRead || (t.updatedAt && t.updatedAt > lastRead)) {
+      state.unreadThreads[t.id] = true;
+    }
+  }
 }
 
 // Render markdown for chat messages using marked.js
@@ -926,6 +958,7 @@ async function loadThreadsData() {
       return 0;
     });
     state.threads = threads;
+    computeUnreadState(threads);
     threadCount.textContent = `${threads.length} thread${threads.length !== 1 ? 's' : ''}`;
 
     if (threads.length === 0) {
@@ -984,15 +1017,17 @@ function renderThreadCard(thread) {
   const isSelected = thread.id === state.activeThreadId;
   const isActive = thread.status === 'active';
   const isPinned = thread.id === 'main';
+  const isUnread = !isSelected && state.unreadThreads[thread.id];
   const updated = thread.updatedAt ? timeAgo(thread.updatedAt) : '';
   const participantNames = formatParticipants(thread.participants);
   const task = state.tasksByThreadId[thread.id];
 
   return `
-    <div class="cc-thread-card ${isSelected ? 'cc-thread-selected' : ''} ${isActive ? '' : 'cc-thread-inactive'} ${isPinned ? 'cc-thread-pinned' : ''}" data-thread-id="${escapeHtml(thread.id)}">
+    <div class="cc-thread-card ${isSelected ? 'cc-thread-selected' : ''} ${isActive ? '' : 'cc-thread-inactive'} ${isPinned ? 'cc-thread-pinned' : ''} ${isUnread ? 'cc-thread-unread' : ''}" data-thread-id="${escapeHtml(thread.id)}">
       <div class="cc-thread-card-header">
         <span class="cc-thread-icon">${isPinned ? '=' : '#'}</span>
         <span class="cc-thread-title">${escapeHtml(title)}</span>
+        ${isUnread ? '<span class="cc-unread-dot"></span>' : ''}
         ${taskStateBadge(task)}
       </div>
       <div class="cc-thread-card-meta">
@@ -1060,6 +1095,7 @@ function showChatArea(title, participants) {
 async function selectThread(threadId) {
   state.activeThreadId = threadId;
   localStorage.setItem('cc-activeThreadId', threadId);
+  markThreadRead(threadId);
 
   // Update sidebar highlights
   renderThreadSidebar(state.threads);
@@ -1395,6 +1431,12 @@ function handleSSEEvent(event) {
           content: msg.content,
           createdAt: msg.createdAt,
         });
+      } else if (msgThreadId && msgThreadId !== state.activeThreadId) {
+        // Mark non-active thread as unread and update sidebar
+        state.unreadThreads[msgThreadId] = true;
+        if (state.activeTab === 'threads') {
+          renderThreadSidebar(state.threads);
+        }
       }
       break;
     }
