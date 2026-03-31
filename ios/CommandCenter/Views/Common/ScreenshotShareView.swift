@@ -7,6 +7,8 @@ struct ScreenshotShareView: View {
     @Environment(ThreadStore.self) var threadStore
     @Environment(\.dismiss) var dismiss
 
+    var screenshotTakenAt: Date = Date()
+
     @State private var screenshotImage: UIImage?
     @State private var caption = ""
     @State private var selectedThreadId: String?
@@ -142,14 +144,46 @@ struct ScreenshotShareView: View {
             return
         }
 
+        // Retry up to 5 times to wait for the new screenshot to appear in the photo library
+        let maxRetries = 5
+        for attempt in 0..<maxRetries {
+            let asset = fetchLatestScreenshotAsset()
+            guard let asset else {
+                if attempt < maxRetries - 1 {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    continue
+                }
+                return
+            }
+
+            // Check if this screenshot was taken after our trigger time (with 3s tolerance)
+            if let creationDate = asset.creationDate,
+               creationDate >= screenshotTakenAt.addingTimeInterval(-3) {
+                screenshotImage = await loadImage(from: asset)
+                return
+            }
+
+            // Screenshot is older than our trigger — wait and retry
+            if attempt < maxRetries - 1 {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+
+        // Fallback: use whatever the latest screenshot is
+        if let asset = fetchLatestScreenshotAsset() {
+            screenshotImage = await loadImage(from: asset)
+        }
+    }
+
+    private func fetchLatestScreenshotAsset() -> PHAsset? {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.fetchLimit = 1
         options.predicate = NSPredicate(format: "mediaSubtypes == %d", PHAssetMediaSubtype.photoScreenshot.rawValue)
+        return PHAsset.fetchAssets(with: .image, options: options).firstObject
+    }
 
-        let results = PHAsset.fetchAssets(with: .image, options: options)
-        guard let asset = results.firstObject else { return }
-
+    private func loadImage(from asset: PHAsset) async -> UIImage? {
         let imageManager = PHImageManager.default()
         let targetSize = CGSize(width: 1080, height: 1920)
         let requestOptions = PHImageRequestOptions()
@@ -157,7 +191,7 @@ struct ScreenshotShareView: View {
         requestOptions.isSynchronous = false
         requestOptions.isNetworkAccessAllowed = true
 
-        screenshotImage = await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             imageManager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: requestOptions) { image, _ in
                 continuation.resume(returning: image)
             }
