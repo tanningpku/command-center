@@ -81,6 +81,17 @@ actor APIService {
         return try await fetch("api/registry")
     }
 
+    func createProject(name: String) async throws -> Project {
+        struct Body: Encodable { let name: String }
+        struct Response: Decodable { let project: Project }
+        // Create project is global — no project header needed
+        let saved = projectId
+        projectId = nil
+        defer { projectId = saved }
+        let resp: Response = try await post("api/projects", body: Body(name: name))
+        return resp.project
+    }
+
     // MARK: - Threads
 
     func fetchThreads() async throws -> ThreadListResponse {

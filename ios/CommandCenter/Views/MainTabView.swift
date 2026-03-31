@@ -17,13 +17,13 @@ struct MainTabView: View {
                 .tag(NavigationRouter.Tab.team)
                 .tabItem { Label("Team", systemImage: "person.3") }
 
-            BoardView()
-                .tag(NavigationRouter.Tab.board)
-                .tabItem { Label("Board", systemImage: "rectangle.split.3x1") }
-
             ThreadListView()
                 .tag(NavigationRouter.Tab.threads)
                 .tabItem { Label("Threads", systemImage: "bubble.left.and.bubble.right") }
+
+            BoardView()
+                .tag(NavigationRouter.Tab.board)
+                .tabItem { Label("Board", systemImage: "rectangle.split.3x1") }
 
             HealthView()
                 .tag(NavigationRouter.Tab.health)

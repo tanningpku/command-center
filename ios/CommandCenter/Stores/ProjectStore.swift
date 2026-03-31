@@ -42,6 +42,12 @@ class ProjectStore {
         isLoading = false
     }
 
+    func createProject(name: String) async throws {
+        let project = try await api.createProject(name: name)
+        projects.append(project)
+        await select(project.id)
+    }
+
     func select(_ id: String) async {
         selectedId = id
         await api.setProject(id)
