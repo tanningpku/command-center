@@ -1060,6 +1060,7 @@ function renderBoardCard(issue) {
 // ── Health Tab ──────────────────────────────────────────────────
 
 let _healthPollTimer = null;
+let _healthFetching = false;
 
 function stopHealthPoll() {
   if (_healthPollTimer) {
@@ -1078,11 +1079,13 @@ function startHealthPoll() {
 async function loadHealthData(silent) {
   const container = document.getElementById('healthContainer');
   if (!container) return;
+  if (_healthFetching) return;
 
   if (!silent) {
     container.innerHTML = '<div class="cc-loading">Loading health data...</div>';
   }
 
+  _healthFetching = true;
   try {
     const data = await apiCall('/api/health');
     renderHealth(data);
@@ -1097,8 +1100,11 @@ async function loadHealthData(silent) {
         </div>
       `;
     }
+  } finally {
+    _healthFetching = false;
   }
-  startHealthPoll();
+  // Don't restart polling if we've been logged out (handle401 stops polling)
+  if (getAuthToken()) startHealthPoll();
 }
 
 function formatUptime(seconds) {
