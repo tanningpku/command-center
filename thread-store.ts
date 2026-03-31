@@ -284,4 +284,14 @@ export class ThreadStore {
       metadata, createdAt: row.created_at,
     };
   }
+
+  /** Quick DB health check — returns true if a simple query succeeds. */
+  checkHealth(): boolean {
+    try {
+      this.db.prepare("SELECT 1").get();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }

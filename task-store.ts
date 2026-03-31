@@ -166,4 +166,14 @@ export class TaskStore {
       createdAt: row.created_at, updatedAt: row.updated_at,
     };
   }
+
+  /** Quick DB health check — returns true if a simple query succeeds. */
+  checkHealth(): boolean {
+    try {
+      this.db.prepare("SELECT 1").get();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
