@@ -735,6 +735,31 @@ export class Gateway {
         return;
       }
 
+      // --- Recovery action endpoints ---
+      if (method === "POST" && pathname === "/api/health/cleanup") {
+        const wsPorts: number[] = [];
+        for (const [id, project] of this.projects) {
+          if (project.status === "inactive") continue;
+          wsPorts.push(project.port + 10000);
+        }
+        const killed = killStaleClaude(wsPorts);
+        this.sseHub.publish("_global", "cleanup_completed", { killed });
+        this.sendJson(res, 200, { ok: true, killed });
+        return;
+      }
+
+      const bridgeActionMatch = pathname.match(/^\/api\/health\/bridges\/([^/]+)\/(restart|stop|start)$/);
+      if (method === "POST" && bridgeActionMatch) {
+        const agentId = bridgeActionMatch[1];
+        const action = bridgeActionMatch[2];
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const project = this.projects.get(projectId);
+        if (!project) { this.sendJson(res, 404, { error: `Unknown project: ${projectId}` }); return; }
+        await this.handleBridgeAction(projectId, project, agentId, action, res);
+        return;
+      }
+
       // --- Assistants endpoint (alias for agents) ---
       if (method === "GET" && pathname === "/api/assistants") {
         const projectId = this.resolveProjectId(req, parsed);
@@ -1068,6 +1093,56 @@ export class Gateway {
     } catch {
       return { ok: false, path: dbPath };
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Recovery action endpoints                                        */
+  /* ---------------------------------------------------------------- */
+
+  private async handleBridgeAction(
+    projectId: string, project: ProjectConfig, agentId: string, action: string, res: http.ServerResponse,
+  ): Promise<void> {
+    const key = this.bridgeKey(projectId, agentId);
+
+    if (action === "stop") {
+      const bridge = this.claudeBridges.get(key);
+      if (!bridge) { this.sendJson(res, 404, { error: `No bridge found for ${agentId}` }); return; }
+      bridge.stop();
+      this.claudeBridges.delete(key);
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "stopped", previousStatus: "ready" });
+      this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "stopped" });
+      return;
+    }
+
+    if (action === "start") {
+      if (this.claudeBridges.has(key)) { this.sendJson(res, 409, { error: `Bridge for ${agentId} is already running` }); return; }
+      try {
+        await this.startAgentBridge(projectId, project, agentId);
+        this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "connecting", previousStatus: "stopped" });
+        this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "starting" });
+      } catch (err) {
+        this.sendJson(res, 500, { error: `Failed to start bridge: ${(err as Error).message}` });
+      }
+      return;
+    }
+
+    if (action === "restart") {
+      const existing = this.claudeBridges.get(key);
+      if (existing) {
+        existing.stop();
+        this.claudeBridges.delete(key);
+      }
+      try {
+        await this.startAgentBridge(projectId, project, agentId);
+        this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "restarting", previousStatus: existing ? "ready" : "stopped" });
+        this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "restarting" });
+      } catch (err) {
+        this.sendJson(res, 500, { error: `Failed to restart bridge: ${(err as Error).message}` });
+      }
+      return;
+    }
+
+    this.sendJson(res, 400, { error: `Unknown action: ${action}` });
   }
 
   /* ---------------------------------------------------------------- */
