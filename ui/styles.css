@@ -1297,6 +1297,29 @@ body {
   border-radius: 4px;
 }
 
+.cc-thread-delete-btn {
+  display: none;
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--cc-text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.cc-thread-delete-btn:hover {
+  color: var(--cc-danger, #e55);
+  background: var(--cc-surface-hover);
+}
+
+.cc-thread-card:hover .cc-thread-delete-btn {
+  display: inline-flex;
+}
+
 .cc-thread-card-meta {
   display: flex;
   gap: 8px;

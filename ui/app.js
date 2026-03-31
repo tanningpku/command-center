@@ -1410,6 +1410,7 @@ function renderThreadCard(thread) {
         <span class="cc-thread-title">${escapeHtml(title)}</span>
         ${isUnread ? '<span class="cc-unread-dot"></span>' : ''}
         ${taskStateBadge(task)}
+        ${!isPinned ? `<button class="cc-thread-delete-btn" data-thread-delete-id="${escapeHtml(thread.id)}" title="Delete thread">&#x2715;</button>` : ''}
       </div>
       <div class="cc-thread-card-meta">
         ${participantNames ? `<span class="cc-thread-participants">${participantNames}</span>` : ''}
@@ -1488,6 +1489,34 @@ async function selectThread(threadId) {
 
   showChatArea(title, participantNames);
   await loadChatMessages(threadId);
+}
+
+async function deleteThread(threadId) {
+  const thread = state.threads.find(t => t.id === threadId);
+  const title = thread ? (thread.title || thread.id) : threadId;
+  if (!confirm(`Delete thread "${title}"? This action cannot be undone.`)) return;
+
+  try {
+    const headers = {};
+    const token = getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (state.selectedProjectId) headers['X-Project-Id'] = state.selectedProjectId;
+    const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE', headers });
+    if (res.status === 401) { handle401(); throw new Error('Unauthorized'); }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    state.threads = state.threads.filter(t => t.id !== threadId);
+    if (state.activeThreadId === threadId) {
+      state.activeThreadId = null;
+      localStorage.removeItem('cc-activeThreadId');
+      showChatEmptyState();
+    }
+    renderThreadSidebar(state.threads);
+  } catch (err) {
+    alert('Failed to delete thread: ' + (err.message || err));
+  }
 }
 
 const MESSAGES_PER_PAGE = 50;
@@ -2094,8 +2123,15 @@ dom.teamGrid.addEventListener('click', (e) => {
   }
 });
 
-// Thread sidebar click — select a thread
+// Thread sidebar click — select or delete a thread
 document.getElementById('threadList').addEventListener('click', (e) => {
+  const deleteBtn = e.target.closest('.cc-thread-delete-btn');
+  if (deleteBtn) {
+    e.stopPropagation();
+    const threadId = deleteBtn.dataset.threadDeleteId;
+    if (threadId) deleteThread(threadId);
+    return;
+  }
   const card = e.target.closest('.cc-thread-card');
   if (!card) return;
   const threadId = card.dataset.threadId;
