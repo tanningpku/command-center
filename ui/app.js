@@ -1513,7 +1513,21 @@ async function deleteThread(threadId) {
       localStorage.removeItem('cc-activeThreadId');
       showChatEmptyState();
     }
-    renderThreadSidebar(state.threads);
+    // Update thread count
+    const threadCount = document.getElementById('threadCount');
+    if (threadCount) {
+      threadCount.textContent = `${state.threads.length} thread${state.threads.length !== 1 ? 's' : ''}`;
+    }
+    // Show empty state if no threads remain
+    if (state.threads.length === 0) {
+      const threadList = document.getElementById('threadList');
+      if (threadList) {
+        threadList.innerHTML = `<div class="cc-thread-sidebar-empty"><p>No threads yet.</p></div>`;
+      }
+      showChatEmptyState();
+    } else {
+      renderThreadSidebar(state.threads);
+    }
   } catch (err) {
     alert('Failed to delete thread: ' + (err.message || err));
   }
