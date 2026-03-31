@@ -741,6 +741,14 @@ export class Gateway {
         for (const [id, project] of this.projects) {
           if (project.status === "inactive") continue;
           wsPorts.push(project.port + 10000);
+          const agentStore = this.agentStores.get(id);
+          if (agentStore) {
+            let workerPort = project.port + 10100;
+            for (const agent of agentStore.list()) {
+              if (agent.id === "captain") continue;
+              wsPorts.push(workerPort++);
+            }
+          }
         }
         const killed = killStaleClaude(wsPorts);
         this.sseHub.publish("_global", "cleanup_completed", { killed });
@@ -1103,6 +1111,19 @@ export class Gateway {
     projectId: string, project: ProjectConfig, agentId: string, action: string, res: http.ServerResponse,
   ): Promise<void> {
     const key = this.bridgeKey(projectId, agentId);
+
+    // For start/restart, verify the agent is eligible (not archived/stopped)
+    if (action === "start" || action === "restart") {
+      if (agentId !== "captain") {
+        const agentStore = this.agentStores.get(projectId);
+        const agent = agentStore?.get(agentId);
+        if (!agent) { this.sendJson(res, 404, { error: `Agent ${agentId} not found` }); return; }
+        if (agent.status === "archived" || agent.status === "stopped") {
+          this.sendJson(res, 409, { error: `Agent ${agentId} is ${agent.status} — update agent status first` });
+          return;
+        }
+      }
+    }
 
     if (action === "stop") {
       const bridge = this.claudeBridges.get(key);
