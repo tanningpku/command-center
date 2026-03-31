@@ -2475,3 +2475,246 @@ body {
   outline-offset: -2px;
   background: var(--cc-accent-bg) !important;
 }
+
+/* ── Health Tab ─────────────────────────────────────────────────── */
+
+.cc-health {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.cc-health-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  padding: 60px 20px;
+}
+
+.cc-health-error h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--cc-text);
+}
+
+.cc-health-error p {
+  color: var(--cc-text-muted);
+  font-size: 13px;
+  max-width: 400px;
+}
+
+.cc-health-banner {
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-left: 3px solid var(--cc-green);
+  border-radius: var(--cc-radius);
+  padding: 16px 20px;
+}
+
+.cc-health-banner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cc-health-banner-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--cc-text-muted);
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.cc-health-banner-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-health-status-label {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cc-health-uptime {
+  font-size: 13px;
+  color: var(--cc-text-muted);
+}
+
+.cc-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.cc-health-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cc-text-muted);
+  margin-top: 4px;
+}
+
+.cc-health-bridges {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cc-health-bridge-card {
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  padding: 14px 18px;
+}
+
+.cc-health-bridge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cc-health-bridge-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-health-bridge-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cc-text);
+}
+
+.cc-health-bridge-status {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.cc-health-bridge-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--cc-text-muted);
+}
+
+.cc-health-bridge-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.cc-health-btn {
+  background: transparent;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--cc-transition);
+  color: var(--cc-text-muted);
+}
+
+.cc-health-btn:hover {
+  color: var(--cc-text);
+  border-color: var(--cc-text-muted);
+  background: var(--cc-surface-hover);
+}
+
+.cc-health-btn-restart:hover {
+  color: var(--cc-yellow);
+  border-color: var(--cc-yellow);
+  background: var(--cc-yellow-bg);
+}
+
+.cc-health-btn-stop:hover {
+  color: var(--cc-red);
+  border-color: var(--cc-red);
+  background: var(--cc-red-bg);
+}
+
+.cc-health-btn-start:hover {
+  color: var(--cc-green);
+  border-color: var(--cc-green);
+  background: var(--cc-green-bg);
+}
+
+.cc-health-btn-cleanup:hover {
+  color: var(--cc-yellow);
+  border-color: var(--cc-yellow);
+  background: var(--cc-yellow-bg);
+}
+
+.cc-health-btn-restart-gw:hover {
+  color: var(--cc-red);
+  border-color: var(--cc-red);
+  background: var(--cc-red-bg);
+}
+
+.cc-health-stores {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cc-health-store-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.cc-health-store-name {
+  color: var(--cc-text);
+  font-weight: 500;
+}
+
+.cc-health-store-status {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cc-health-store-size {
+  color: var(--cc-text-faint);
+  font-size: 11px;
+}
+
+.cc-health-sse {
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  color: var(--cc-text-muted);
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  padding: 10px 16px;
+}
+
+.cc-health-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.cc-health-empty {
+  color: var(--cc-text-faint);
+  font-size: 12px;
+  padding: 8px 0;
+}
