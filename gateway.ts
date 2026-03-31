@@ -391,7 +391,7 @@ export class Gateway {
         timestamp: new Date().toISOString(),
       });
       this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "escalation_stopped", previousStatus: "restarting" });
-      this.claudeBridges.delete(compositeKey);
+      // Keep bridge in claudeBridges so health/status APIs can still report it as stopped
       this.escalationStoppedBridges.add(compositeKey);
       this.postHealthAlert(projectId, `🚨 Bridge **${agentId}** stopped — ${info.restartCount} restarts in ${Math.round(info.windowMs / 1000)}s (last: ${info.lastReason}). Manual intervention required.`);
     });
@@ -1174,9 +1174,8 @@ export class Gateway {
   ): Promise<void> {
     const key = this.bridgeKey(projectId, agentId);
 
-    // For start/restart, clear escalation flag (manual intervention satisfies the requirement)
+    // For start/restart, verify the agent is eligible (not archived/stopped)
     if (action === "start" || action === "restart") {
-      this.escalationStoppedBridges.delete(key);
       if (agentId !== "captain") {
         const agentStore = this.agentStores.get(projectId);
         const agent = agentStore?.get(agentId);
@@ -1199,9 +1198,16 @@ export class Gateway {
     }
 
     if (action === "start") {
-      if (this.claudeBridges.has(key)) { this.sendJson(res, 409, { error: `Bridge for ${agentId} is already running` }); return; }
+      // For escalation-stopped bridges, the old bridge is still in the map — remove it first
+      const stale = this.claudeBridges.get(key);
+      if (stale && !this.escalationStoppedBridges.has(key)) {
+        this.sendJson(res, 409, { error: `Bridge for ${agentId} is already running` });
+        return;
+      }
+      if (stale) { this.claudeBridges.delete(key); }
       try {
         await this.startAgentBridge(projectId, project, agentId);
+        this.escalationStoppedBridges.delete(key);
         this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "connecting", previousStatus: "stopped" });
         this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "starting" });
       } catch (err) {
@@ -1218,6 +1224,7 @@ export class Gateway {
       }
       try {
         await this.startAgentBridge(projectId, project, agentId);
+        this.escalationStoppedBridges.delete(key);
         this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "restarting", previousStatus: existing ? "ready" : "stopped" });
         this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "restarting" });
       } catch (err) {
