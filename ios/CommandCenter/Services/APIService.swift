@@ -214,6 +214,49 @@ actor APIService {
     func checkStatus() async throws -> StatusResponse {
         try await fetch("api/status")
     }
+
+    // MARK: - Health
+
+    func fetchHealth() async throws -> HealthData {
+        // Health endpoint is global (no project scope) — build request directly
+        // to avoid mutating projectId which could race with other actor calls.
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/health"))
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        do {
+            return try JSONDecoder().decode(HealthData.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+
+    func restartBridge(agentId: String, reason: String? = nil) async throws -> RecoveryActionResponse {
+        struct Body: Encodable { let reason: String? }
+        return try await post("api/health/bridges/\(agentId)/restart", body: Body(reason: reason ?? "manual restart"))
+    }
+
+    func stopBridge(agentId: String) async throws -> RecoveryActionResponse {
+        struct Body: Encodable { let reason: String? }
+        return try await post("api/health/bridges/\(agentId)/stop", body: Body(reason: "manual stop"))
+    }
+
+    func startBridge(agentId: String) async throws -> RecoveryActionResponse {
+        struct Body: Encodable { let reason: String? }
+        return try await post("api/health/bridges/\(agentId)/start", body: Body(reason: nil))
+    }
+
+    func cleanupStaleProcesses() async throws -> RecoveryActionResponse {
+        struct Empty: Encodable {}
+        return try await post("api/health/cleanup", body: Empty())
+    }
+
+    func restartGateway() async throws -> RecoveryActionResponse {
+        struct Empty: Encodable {}
+        return try await post("api/restart", body: Empty())
+    }
 }
 
 // MARK: - Response types

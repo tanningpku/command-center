@@ -24,6 +24,7 @@ class ThreadStore {
     /// Callbacks for routing SSE events to other stores
     var onAgentEvent: ((String, [String: Any]) -> Void)?
     var onTaskEvent: ((String, [String: Any]) -> Void)?
+    var onHealthEvent: ((String, [String: Any]) -> Void)?
 
     /// Called when SSE reconnects so views can reload data
     var onReconnect: (() -> Void)?
@@ -187,6 +188,10 @@ class ThreadStore {
 
         case "agent_created", "agent_updated", "agent_archived":
             onAgentEvent?(event.type, event.payload)
+
+        case "health_changed", "bridge_status_changed", "bridge_stopped", "bridge_started",
+             "bridge_restarted", "health_alert":
+            onHealthEvent?(event.type, event.payload)
 
         case "assistant_text":
             // Could show typing indicator — future enhancement

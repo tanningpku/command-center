@@ -9,6 +9,7 @@ struct CommandCenterApp: App {
     @State private var teamStore: TeamStore
     @State private var boardStore: BoardStore
     @State private var homeStore: HomeStore
+    @State private var healthStore: HealthStore
     @State private var router = NavigationRouter()
 
     init() {
@@ -22,6 +23,7 @@ struct CommandCenterApp: App {
         self.teamStore = TeamStore(api: api)
         self.boardStore = BoardStore(api: api)
         self.homeStore = HomeStore(api: api)
+        self.healthStore = HealthStore(api: api)
     }
 
     var body: some Scene {
@@ -32,6 +34,7 @@ struct CommandCenterApp: App {
                 .environment(teamStore)
                 .environment(boardStore)
                 .environment(homeStore)
+                .environment(healthStore)
                 .environment(router)
                 .task {
                     await projectStore.load()
@@ -53,12 +56,16 @@ struct CommandCenterApp: App {
         threadStore.onTaskEvent = { type, payload in
             boardStore.handleTaskEvent(type: type, payload: payload)
         }
+        threadStore.onHealthEvent = { type, payload in
+            healthStore.handleHealthEvent(type: type, payload: payload)
+        }
         threadStore.onReconnect = {
             // Auto-reload all data when SSE reconnects
             Task {
                 await threadStore.loadThreads()
                 await boardStore.loadTasks()
                 await teamStore.loadAgents()
+                await healthStore.loadHealth()
             }
         }
     }
@@ -66,6 +73,7 @@ struct CommandCenterApp: App {
     private func reconnectSSE() {
         guard let projectId = projectStore.selectedId,
               let baseURL = AppConfig.baseURL else { return }
+        healthStore.activeProjectId = projectId
         threadStore.connectSSE(baseURL: baseURL, projectId: projectId)
     }
 }
