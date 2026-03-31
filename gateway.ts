@@ -92,6 +92,8 @@ export class Gateway {
   private readonly kbManagers: Map<string, KbManager> = new Map();
   /** Bridges keyed by "projectId:agentId" */
   private readonly claudeBridges: Map<string, ClaudeBridge> = new Map();
+  /** Bridges stopped by restart escalation — prevents ensureBridge from respawning them. */
+  private readonly escalationStoppedBridges: Set<string> = new Set();
   private readonly sseHub = new SseHub();
   /** Next available worker port per project */
   private readonly nextWorkerPort: Map<string, number> = new Map();
@@ -390,6 +392,7 @@ export class Gateway {
       });
       this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "escalation_stopped", previousStatus: "restarting" });
       this.claudeBridges.delete(compositeKey);
+      this.escalationStoppedBridges.add(compositeKey);
       this.postHealthAlert(projectId, `🚨 Bridge **${agentId}** stopped — ${info.restartCount} restarts in ${Math.round(info.windowMs / 1000)}s (last: ${info.lastReason}). Manual intervention required.`);
     });
 
@@ -553,6 +556,10 @@ export class Gateway {
   private async ensureBridge(projectId: string, agentId: string): Promise<ClaudeBridge | undefined> {
     const existing = this.resolveBridge(projectId, agentId);
     if (existing) return existing;
+
+    // Don't respawn bridges stopped by escalation — requires manual restart
+    const key = this.bridgeKey(projectId, agentId);
+    if (this.escalationStoppedBridges.has(key)) return undefined;
 
     const agentStore = this.agentStores.get(projectId);
     if (agentId !== "captain") {
@@ -1167,8 +1174,9 @@ export class Gateway {
   ): Promise<void> {
     const key = this.bridgeKey(projectId, agentId);
 
-    // For start/restart, verify the agent is eligible (not archived/stopped)
+    // For start/restart, clear escalation flag (manual intervention satisfies the requirement)
     if (action === "start" || action === "restart") {
+      this.escalationStoppedBridges.delete(key);
       if (agentId !== "captain") {
         const agentStore = this.agentStores.get(projectId);
         const agent = agentStore?.get(agentId);
