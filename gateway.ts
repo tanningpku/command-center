@@ -1265,10 +1265,24 @@ export class Gateway {
     if (method === "POST" && pathname === "/api/threads") {
       const body = await this.readBody(req);
       if (!body.title) { this.sendJson(res, 400, { error: "title is required" }); return; }
-      const participants = Array.isArray(body.participants) ? body.participants : [];
-      const thread = store.createThread({ title: body.title, participants });
-      this.sseHub.publish(projectId, "thread_created", thread);
-      this.sendJson(res, 201, { thread });
+      // Normalize participant format: accept {id} shorthand or full {participantType, participantId}
+      const rawParticipants = Array.isArray(body.participants) ? body.participants : [];
+      const participants = rawParticipants.map((p: any) => ({
+        participantType: p.participantType ?? "assistant",
+        participantId: p.participantId ?? p.id,
+        role: p.role,
+      })).filter((p: any) => p.participantId);
+      try {
+        const thread = store.createThread({ title: body.title, participants });
+        this.sseHub.publish(projectId, "thread_created", thread);
+        this.sendJson(res, 201, { thread });
+      } catch (err: any) {
+        if (err.message?.includes("duplicate")) {
+          this.sendJson(res, 409, { error: err.message });
+        } else {
+          throw err;
+        }
+      }
       return;
     }
 
