@@ -109,7 +109,7 @@ struct HealthView: View {
                 healthStore.startPolling()
                 // Wait for cancellation, then stop polling
                 await withTaskCancellationHandler {
-                    try? await Task.sleep(for: .seconds(.max))
+                    try? await Task.sleep(for: .seconds(86400 * 365))
                 } onCancel: {
                     Task { @MainActor in healthStore.stopPolling() }
                 }
