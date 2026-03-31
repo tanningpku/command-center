@@ -6,10 +6,79 @@
  *
  * Reference: companion/src/core/claude-server.ts + protocol.ts
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { WebSocket, WebSocketServer } from "ws";
+
+/* ------------------------------------------------------------------ */
+/*  Port cleanup utilities                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Find PIDs listening on a given port via lsof. Returns an array of PIDs.
+ */
+function findPidsOnPort(port: number): number[] {
+  try {
+    const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf-8", timeout: 5_000 });
+    return out.trim().split("\n").map(Number).filter((n) => !isNaN(n) && n > 0);
+  } catch {
+    return []; // lsof exits non-zero when no matches
+  }
+}
+
+/**
+ * Kill any processes listening on the given port. Returns the number of
+ * processes killed.
+ */
+export function killProcessesOnPort(port: number): number {
+  const pids = findPidsOnPort(port);
+  let killed = 0;
+  for (const pid of pids) {
+    if (pid === process.pid) continue; // never kill ourselves
+    try {
+      process.kill(pid, "SIGKILL");
+      killed++;
+      console.log(`[bridge-cleanup] Killed PID ${pid} on port ${port}`);
+    } catch {
+      // Process may have already exited
+    }
+  }
+  return killed;
+}
+
+/**
+ * Find and kill stale claude CLI processes whose --sdk-url matches any of the
+ * given WS ports. Used at gateway startup to clean up zombies from prior runs.
+ */
+export function killStaleClaude(wsPorts: number[]): number {
+  if (wsPorts.length === 0) return 0;
+  let killed = 0;
+  try {
+    const out = execSync("ps aux", { encoding: "utf-8", timeout: 5_000 });
+    for (const line of out.split("\n")) {
+      if (!line.includes("--sdk-url")) continue;
+      for (const port of wsPorts) {
+        if (line.includes(`ws://localhost:${port}/claude`)) {
+          const parts = line.trim().split(/\s+/);
+          const pid = Number(parts[1]);
+          if (!pid || pid === process.pid) continue;
+          try {
+            process.kill(pid, "SIGKILL");
+            killed++;
+            console.log(`[bridge-cleanup] Killed stale claude PID ${pid} (port ${port})`);
+          } catch {
+            // already gone
+          }
+          break;
+        }
+      }
+    }
+  } catch {
+    // ps not available or failed — non-fatal
+  }
+  return killed;
+}
 
 /* ------------------------------------------------------------------ */
 /*  NDJSON Protocol (ported from companion/src/core/protocol.ts)       */
@@ -153,11 +222,11 @@ export class ClaudeBridge extends EventEmitter {
     super();
   }
 
+  private static readonly MAX_PORT_RETRIES = 3;
+
   async start(): Promise<void> {
     this.stopped = false;
-    this.wss = new WebSocketServer({ port: this.opts.wsPort, path: "/claude" });
-    this.wss.on("connection", (socket) => this.onConnection(socket));
-    console.log(`[${this.tag}] WS server listening on port ${this.opts.wsPort}`);
+    await this.listenWithRetry();
 
     if (this.opts.mockClaude) {
       console.log(`[${this.tag}] MOCK mode — no subprocess`);
@@ -165,6 +234,47 @@ export class ClaudeBridge extends EventEmitter {
     }
     this.spawnChild();
     this.startWatchdog();
+  }
+
+  /**
+   * Attempt to bind the WebSocket server. On EADDRINUSE, kill the occupying
+   * process and retry up to MAX_PORT_RETRIES times.
+   */
+  private async listenWithRetry(): Promise<void> {
+    for (let attempt = 1; attempt <= ClaudeBridge.MAX_PORT_RETRIES; attempt++) {
+      try {
+        await this.bindWss();
+        console.log(`[${this.tag}] WS server listening on port ${this.opts.wsPort}`);
+        return;
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "EADDRINUSE" || attempt === ClaudeBridge.MAX_PORT_RETRIES) {
+          throw err;
+        }
+        console.warn(
+          `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Killing occupant and retrying...`,
+        );
+        killProcessesOnPort(this.opts.wsPort);
+        // Brief pause to let the OS release the port
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
+  }
+
+  /** Create a WebSocketServer and wait for it to be listening (or error). */
+  private bindWss(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const wss = new WebSocketServer({ port: this.opts.wsPort, path: "/claude" });
+      wss.on("listening", () => {
+        this.wss = wss;
+        wss.on("connection", (socket) => this.onConnection(socket));
+        resolve();
+      });
+      wss.on("error", (err) => {
+        wss.close();
+        reject(err);
+      });
+    });
   }
 
   stop(): void {
