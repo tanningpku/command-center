@@ -1086,7 +1086,6 @@ async function loadHealthData(silent) {
   try {
     const data = await apiCall('/api/health');
     renderHealth(data);
-    startHealthPoll();
   } catch (err) {
     if (!silent) {
       container.innerHTML = `
@@ -1099,6 +1098,7 @@ async function loadHealthData(silent) {
       `;
     }
   }
+  startHealthPoll();
 }
 
 function formatUptime(seconds) {
@@ -1158,7 +1158,7 @@ function renderHealth(data) {
       </div>
       <div class="cc-health-banner-row cc-health-banner-meta">
         <span>Memory: ${mem.rss_mb ?? '--'}MB RSS / ${mem.heap_used_mb ?? '--'}MB Heap</span>
-        <span>Requests: ${data.requestCount ?? '--'}</span>
+        <span>Requests: ${data.request_count ?? '--'}</span>
         <span>Errors (1h): ${errorsLastHour}</span>
       </div>
     </div>
