@@ -94,6 +94,12 @@ class ThreadStore {
         return thread
     }
 
+    func deleteThread(id: String) async throws {
+        try await api.deleteThread(id: id)
+        threads.removeAll { $0.id == id }
+        threadPreviews.removeValue(forKey: id)
+    }
+
     // MARK: - Messages
 
     func loadMessages(threadId: String) async {
@@ -181,6 +187,12 @@ class ThreadStore {
                 if let idx = threads.firstIndex(where: { $0.id == thread.id }) {
                     threads[idx] = thread
                 }
+            }
+
+        case "thread_deleted":
+            if let id = event.payload["id"] as? String {
+                threads.removeAll { $0.id == id }
+                threadPreviews.removeValue(forKey: id)
             }
 
         case "task_created", "task_updated", "task_completed":

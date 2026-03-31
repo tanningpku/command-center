@@ -11,6 +11,7 @@ struct ThreadListView: View {
     @State private var showSettings = false
     @State private var showCompleted = false
     @State private var showNewThread = false
+    @State private var threadToDelete: CCThread?
 
     /// Thread IDs linked to done/cancelled tasks
     private var completedThreadIds: Set<String> {
@@ -147,6 +148,25 @@ struct ThreadListView: View {
                     navigationPath.append(thread)
                 }
             }
+            .alert("Delete Thread?", isPresented: Binding(
+                get: { threadToDelete != nil },
+                set: { if !$0 { threadToDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { threadToDelete = nil }
+                Button("Delete", role: .destructive) {
+                    if let thread = threadToDelete {
+                        Task {
+                            try? await threadStore.deleteThread(id: thread.id)
+                            HapticManager.success()
+                        }
+                    }
+                    threadToDelete = nil
+                }
+            } message: {
+                if let thread = threadToDelete {
+                    Text("This will archive \"\(thread.title)\". This action cannot be undone.")
+                }
+            }
         }
     }
 
@@ -155,6 +175,13 @@ struct ThreadListView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { navigationPath.append(thread) }
+            .contextMenu {
+                Button(role: .destructive) {
+                    threadToDelete = thread
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .overlay(alignment: .bottom) {
