@@ -676,16 +676,14 @@ for pid, proj in projects.items():
     store_parts = []
     for sname, sinfo in stores.items():
         ok = 'OK' if sinfo.get('ok') else 'FAIL'
-        size = sinfo.get('size_kb', '?')
-        store_parts.append(f'{sname}: {ok} ({size}KB)')
+        store_parts.append(f'{sname}: {ok}')
     if store_parts:
         print(f'  Stores: {\" | \".join(store_parts)}')
 
 sse = d.get('sse', {})
 clients = sse.get('connected_clients', '?')
 buf = sse.get('buffer_size', '?')
-cap = sse.get('buffer_capacity', '?')
-print(f'  SSE: {clients} clients | Buffer: {buf}/{cap}')
+print(f'  SSE: {clients} clients | Buffer: {buf}')
 " 2>/dev/null || echo "$HEALTH_JSON"
         ;;
       *) echo "Usage: cc health [--json | cleanup]"; exit 2;;
