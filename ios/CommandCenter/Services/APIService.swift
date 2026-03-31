@@ -218,11 +218,19 @@ actor APIService {
     // MARK: - Health
 
     func fetchHealth() async throws -> HealthData {
-        // Health endpoint is global (no project scope needed)
-        let saved = projectId
-        projectId = nil
-        defer { projectId = saved }
-        return try await fetch("api/health")
+        // Health endpoint is global (no project scope) — build request directly
+        // to avoid mutating projectId which could race with other actor calls.
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/health"))
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        do {
+            return try JSONDecoder().decode(HealthData.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
 
     func restartBridge(agentId: String, reason: String? = nil) async throws -> RecoveryActionResponse {

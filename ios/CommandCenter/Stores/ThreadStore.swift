@@ -190,7 +190,7 @@ class ThreadStore {
             onAgentEvent?(event.type, event.payload)
 
         case "health_changed", "bridge_status_changed", "bridge_stopped", "bridge_started",
-             "bridge_restarted", "health_alert", "cleanup_completed":
+             "bridge_restarted", "health_alert":
             onHealthEvent?(event.type, event.payload)
 
         case "assistant_text":

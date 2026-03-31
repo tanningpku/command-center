@@ -271,9 +271,11 @@ private struct StoreCard: View {
                 .foregroundStyle(store.ok ? .green : .red)
             Text(store.name)
                 .font(.caption.bold())
-            Text("\(store.sizeKb)KB")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if let kb = store.sizeKb {
+                Text("\(kb)KB")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
@@ -295,7 +297,7 @@ private struct SSEStatusCard: View {
 
             HStack(spacing: 20) {
                 StatItem(label: "Clients", value: "\(sse.connectedClients)")
-                StatItem(label: "Buffer", value: "\(sse.bufferSize)/\(sse.bufferCapacity)")
+                StatItem(label: "Buffer", value: sse.formattedBuffer)
             }
             .padding()
             .background(Color(.secondarySystemGroupedBackground))

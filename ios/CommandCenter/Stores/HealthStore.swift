@@ -64,9 +64,6 @@ class HealthStore {
         case "health_alert":
             Task { await loadHealth() }
             HapticManager.medium()
-        case "cleanup_completed":
-            Task { await loadHealth() }
-            HapticManager.light()
         default:
             break
         }

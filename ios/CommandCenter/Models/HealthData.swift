@@ -210,7 +210,7 @@ struct StoreHealth: Identifiable, Codable, Hashable {
     let name: String
     let ok: Bool
     let path: String
-    let sizeKb: Int
+    let sizeKb: Int?
 
     enum CodingKeys: String, CodingKey {
         case ok, path
@@ -222,7 +222,7 @@ struct StoreHealth: Identifiable, Codable, Hashable {
     }
 
     // name is set from the dictionary key, not from JSON
-    init(name: String, ok: Bool, path: String, sizeKb: Int) {
+    init(name: String, ok: Bool, path: String, sizeKb: Int?) {
         self.name = name
         self.ok = ok
         self.path = path
@@ -232,15 +232,15 @@ struct StoreHealth: Identifiable, Codable, Hashable {
     init(from decoder: Decoder) throws {
         // name will be set by the parent decoder
         self.name = ""
-        if let c = try? decoder.container(keyedBy: CodingKeys.self), c.contains(.sizeKb) {
+        if let c = try? decoder.container(keyedBy: CodingKeys.self) {
             ok = (try? c.decode(Bool.self, forKey: .ok)) ?? false
             path = (try? c.decode(String.self, forKey: .path)) ?? ""
-            sizeKb = (try? c.decode(Int.self, forKey: .sizeKb)) ?? 0
+            sizeKb = try? c.decode(Int.self, forKey: .sizeKb)
         } else {
             let c = try decoder.container(keyedBy: AltCodingKeys.self)
             ok = (try? c.decode(Bool.self, forKey: .ok)) ?? false
             path = (try? c.decode(String.self, forKey: .path)) ?? ""
-            sizeKb = (try? c.decode(Int.self, forKey: .sizeKb)) ?? 0
+            sizeKb = try? c.decode(Int.self, forKey: .sizeKb)
         }
     }
 }
@@ -248,7 +248,7 @@ struct StoreHealth: Identifiable, Codable, Hashable {
 struct SSEInfo: Codable {
     let connectedClients: Int
     let bufferSize: Int
-    let bufferCapacity: Int
+    let bufferCapacity: Int?
 
     enum CodingKeys: String, CodingKey {
         case connectedClients = "connected_clients"
@@ -260,7 +260,7 @@ struct SSEInfo: Codable {
         case connectedClients, bufferSize, bufferCapacity
     }
 
-    init(connectedClients: Int, bufferSize: Int, bufferCapacity: Int) {
+    init(connectedClients: Int, bufferSize: Int, bufferCapacity: Int?) {
         self.connectedClients = connectedClients
         self.bufferSize = bufferSize
         self.bufferCapacity = bufferCapacity
@@ -270,16 +270,24 @@ struct SSEInfo: Codable {
         if let c = try? decoder.container(keyedBy: CodingKeys.self), c.contains(.connectedClients) {
             connectedClients = (try? c.decode(Int.self, forKey: .connectedClients)) ?? 0
             bufferSize = (try? c.decode(Int.self, forKey: .bufferSize)) ?? 0
-            bufferCapacity = (try? c.decode(Int.self, forKey: .bufferCapacity)) ?? 0
+            bufferCapacity = try? c.decode(Int.self, forKey: .bufferCapacity)
         } else {
             let c = try decoder.container(keyedBy: AltCodingKeys.self)
             connectedClients = (try? c.decode(Int.self, forKey: .connectedClients)) ?? 0
             bufferSize = (try? c.decode(Int.self, forKey: .bufferSize)) ?? 0
-            bufferCapacity = (try? c.decode(Int.self, forKey: .bufferCapacity)) ?? 0
+            bufferCapacity = try? c.decode(Int.self, forKey: .bufferCapacity)
         }
     }
 
-    static let empty = SSEInfo(connectedClients: 0, bufferSize: 0, bufferCapacity: 0)
+    /// Formatted buffer display: "142/200" if capacity known, otherwise just "142"
+    var formattedBuffer: String {
+        if let cap = bufferCapacity {
+            return "\(bufferSize)/\(cap)"
+        }
+        return "\(bufferSize)"
+    }
+
+    static let empty = SSEInfo(connectedClients: 0, bufferSize: 0, bufferCapacity: nil)
 }
 
 /// Response from recovery action endpoints
