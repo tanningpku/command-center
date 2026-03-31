@@ -336,7 +336,10 @@ export class Gateway {
     });
 
     bridge.on("restarted", (info: { reason: string }) => {
-      this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "restarting", previousStatus: "disconnected", reason: info.reason });
+      // Note: "restarted" fires after "ready" — the bridge is already up.
+      // We publish agent_restarted for logging/alerting but don't duplicate
+      // the bridge_status_changed event (ready handler covers that).
+      this.sseHub.publish(projectId, "agent_restarted", { agentId, reason: info.reason });
     });
 
     bridge.on("watchdog_kill", (info: { agentId: string; sinceActivityMs: number }) => {
@@ -1016,8 +1019,8 @@ export class Gateway {
         stores,
       };
 
-      // If project has no bridges at all, don't count as "all down"
-      if (Object.keys(bridges).length === 0) allDown = false;
+      // Only active projects with bridges count toward the allDown check
+      if (project.status !== "active" || Object.keys(bridges).length === 0) continue;
     }
 
     let status: string;
