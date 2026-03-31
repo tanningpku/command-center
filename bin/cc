@@ -657,7 +657,10 @@ heap = mem.get('heap_used_mb', '?')
 print(f'System: {status} | Uptime: {uptime_str} | Memory: {rss}MB RSS / {heap}MB Heap')
 
 # Bridges per project
-for pid, proj in d.get('projects', {}).items():
+projects = d.get('projects', {})
+for pid, proj in projects.items():
+    if len(projects) > 1:
+        print(f'[{pid}]')
     bridges = proj.get('bridges', {})
     for aid, b in bridges.items():
         bstatus = b.get('status', 'unknown').upper()
