@@ -41,33 +41,45 @@ function findPidsOnPort(port: number): number[] {
 }
 
 /**
- * Kill stale claude processes listening on the given port. Only kills processes
- * confirmed to be claude CLI instances (by inspecting their command line).
- * Returns the number of processes killed.
+ * Get the command line of a PID for logging. Returns empty string on failure.
  */
-export function killClaudeOnPort(port: number): number {
+function getProcessCmdline(pid: number): string {
+  try {
+    return execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", timeout: 3_000 }).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Attempt to free a port held by a stale process. On EADDRINUSE the listener
+ * is typically an old gateway (node) process, not a claude child. This function:
+ * 1. Finds the PID holding the port
+ * 2. Sends SIGTERM (graceful) then SIGKILL if needed
+ * 3. Only kills if the PID is NOT our own process
+ * Returns true if a process was killed.
+ */
+export function freePort(port: number): boolean {
   const pids = findPidsOnPort(port);
-  let killed = 0;
   for (const pid of pids) {
     if (pid === process.pid) continue;
-    if (!isClaudeProcess(pid)) {
-      console.log(`[bridge-cleanup] PID ${pid} on port ${port} is not a claude process — skipping`);
-      continue;
-    }
+    const cmd = getProcessCmdline(pid);
+    console.warn(`[bridge-cleanup] Port ${port} held by PID ${pid}: ${cmd || "(unknown)"}`);
     try {
-      process.kill(pid, "SIGKILL");
-      killed++;
-      console.log(`[bridge-cleanup] Killed stale claude PID ${pid} on port ${port}`);
+      process.kill(pid, "SIGTERM");
+      console.log(`[bridge-cleanup] Sent SIGTERM to PID ${pid} on port ${port}`);
+      return true;
     } catch {
-      // Process may have already exited
+      // already gone
     }
   }
-  return killed;
+  return false;
 }
 
 /**
  * Find and kill stale claude CLI processes whose --sdk-url matches any of the
  * given WS ports. Used at gateway startup to clean up zombies from prior runs.
+ * Each candidate PID is verified via isClaudeProcess() before being killed.
  */
 export function killStaleClaude(wsPorts: number[]): number {
   if (wsPorts.length === 0) return 0;
@@ -81,6 +93,7 @@ export function killStaleClaude(wsPorts: number[]): number {
           const parts = line.trim().split(/\s+/);
           const pid = Number(parts[1]);
           if (!pid || pid === process.pid) continue;
+          if (!isClaudeProcess(pid)) continue;
           try {
             process.kill(pid, "SIGKILL");
             killed++;
@@ -255,8 +268,8 @@ export class ClaudeBridge extends EventEmitter {
   }
 
   /**
-   * Attempt to bind the WebSocket server. On EADDRINUSE, kill the occupying
-   * process and retry up to MAX_PORT_RETRIES times.
+   * Attempt to bind the WebSocket server. On EADDRINUSE, attempt to free the
+   * port (typically held by a stale gateway process) and retry.
    */
   private async listenWithRetry(): Promise<void> {
     for (let attempt = 1; attempt <= ClaudeBridge.MAX_PORT_RETRIES; attempt++) {
@@ -270,11 +283,11 @@ export class ClaudeBridge extends EventEmitter {
           throw err;
         }
         console.warn(
-          `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Killing occupant and retrying...`,
+          `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Attempting to free port...`,
         );
-        killClaudeOnPort(this.opts.wsPort);
-        // Brief pause to let the OS release the port
-        await new Promise((r) => setTimeout(r, 500 * attempt));
+        freePort(this.opts.wsPort);
+        // Wait for the OS to release the port after SIGTERM
+        await new Promise((r) => setTimeout(r, 1_000 * attempt));
       }
     }
   }
