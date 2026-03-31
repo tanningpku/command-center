@@ -1339,6 +1339,7 @@ export class Gateway {
     if (threadMatch && method === "DELETE") {
       const threadId = decodeURIComponent(threadMatch[1]);
       store.updateThread(threadId, { status: "archived" });
+      this.sseHub.publish(projectId, "thread_deleted", { id: threadId });
       this.sendJson(res, 200, { ok: true });
       return;
     }

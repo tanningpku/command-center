@@ -121,6 +121,14 @@ actor APIService {
         return resp.thread
     }
 
+    func deleteThread(id: String) async throws {
+        let req = request("api/threads/\(id)", method: "DELETE")
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+    }
+
     // MARK: - Agents
 
     func fetchAgents() async throws -> AgentListResponse {
