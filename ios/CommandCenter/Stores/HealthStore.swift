@@ -54,11 +54,20 @@ class HealthStore {
     func handleHealthEvent(type: String, payload: [String: Any]) {
         switch type {
         case "health_changed":
-            // Full reload to get updated status
             Task { await loadHealth() }
             HapticManager.medium()
-        case "bridge_status_changed", "bridge_stopped", "bridge_started", "bridge_restarted":
-            // Reload to reflect bridge state changes
+        case "bridge_status_changed":
+            // Apply status from the SSE payload immediately (captures transient
+            // states like "stuck" that may resolve before a full reload returns),
+            // then reload to get complete data.
+            if let agentId = payload["agentId"] as? String,
+               let statusStr = payload["status"] as? String,
+               let status = BridgeStatus(rawValue: statusStr) {
+                applyBridgeStatus(agentId: agentId, status: status)
+            }
+            Task { await loadHealth() }
+            HapticManager.light()
+        case "bridge_stopped", "bridge_started", "bridge_restarted":
             Task { await loadHealth() }
             HapticManager.light()
         case "health_alert":
@@ -66,6 +75,25 @@ class HealthStore {
             HapticManager.medium()
         default:
             break
+        }
+    }
+
+    /// Optimistically patch a bridge's status in the cached health data.
+    private func applyBridgeStatus(agentId: String, status: BridgeStatus) {
+        guard var data = healthData else { return }
+        for (projectId, var project) in data.projects {
+            if var bridge = project.bridges[agentId] {
+                let updated = BridgeHealth(
+                    agentId: agentId,
+                    status: status,
+                    ready: status == .ready,
+                    bridge: bridge
+                )
+                project.bridges[agentId] = updated
+                data.projects[projectId] = project
+                healthData = data
+                return
+            }
         }
     }
 

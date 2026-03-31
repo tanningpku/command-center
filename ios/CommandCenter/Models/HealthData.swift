@@ -6,7 +6,7 @@ struct HealthData: Codable {
     let uptimeSeconds: Int
     let startedAt: String
     let memory: MemoryInfo
-    let projects: [String: ProjectHealth]
+    var projects: [String: ProjectHealth]
     let sse: SSEInfo
     let errorsLastHour: Int
 
@@ -108,7 +108,7 @@ struct MemoryInfo: Codable {
 
 struct ProjectHealth: Codable {
     let status: String
-    let bridges: [String: BridgeHealth]
+    var bridges: [String: BridgeHealth]
     let stores: [String: StoreHealth]
 }
 
@@ -358,6 +358,20 @@ extension BridgeHealth {
         self.agentId = agentId
         self.status = bridge.status
         self.ready = bridge.ready
+        self.uptimeSeconds = bridge.uptimeSeconds
+        self.startedAt = bridge.startedAt
+        self.lastActivityAt = bridge.lastActivityAt
+        self.restartCount = bridge.restartCount
+        self.lastRestartReason = bridge.lastRestartReason
+        self.wsPort = bridge.wsPort
+        self.pid = bridge.pid
+    }
+
+    /// Create a copy with an overridden status (for optimistic SSE updates)
+    init(agentId: String, status: BridgeStatus, ready: Bool, bridge: BridgeHealth) {
+        self.agentId = agentId
+        self.status = status
+        self.ready = ready
         self.uptimeSeconds = bridge.uptimeSeconds
         self.startedAt = bridge.startedAt
         self.lastActivityAt = bridge.lastActivityAt
