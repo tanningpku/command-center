@@ -7,6 +7,12 @@ struct ThreadPreview {
     let time: String
 }
 
+/// A snapshot of Captain's (or any agent's) latest streamed thought.
+struct CaptainThought: Equatable {
+    let agentName: String
+    let text: String
+}
+
 /// Manages thread list, active thread messages, SSE event handling, and optimistic sends.
 @MainActor
 @Observable
@@ -20,6 +26,9 @@ class ThreadStore {
     var isConnected = false
     var isStale = false
     var error: String?
+
+    /// Latest streamed agent thought for the captain bar.
+    var captainThought: CaptainThought?
 
     /// Callbacks for routing SSE events to other stores
     var onAgentEvent: ((String, [String: Any]) -> Void)?
@@ -205,9 +214,13 @@ class ThreadStore {
              "bridge_restarted", "health_alert":
             onHealthEvent?(event.type, event.payload)
 
-        case "assistant_text":
-            // Could show typing indicator — future enhancement
-            break
+        case "assistant_text", "outbound_message":
+            handleAgentThought(event.payload)
+
+        case "captain_message":
+            if let message = event.payload["message"] as? String {
+                captainThought = CaptainThought(agentName: "Captain", text: message)
+            }
 
         case "claude_ready", "claude_result":
             break
@@ -245,6 +258,17 @@ class ThreadStore {
 
         messages.append(msg)
         seenContentHashes.insert(msg.contentHash)
+    }
+
+    private func handleAgentThought(_ payload: [String: Any]) {
+        let text = (payload["text"] as? String)
+            ?? (payload["content"] as? String)
+            ?? ""
+        guard !text.isEmpty else { return }
+
+        let agentName = (payload["agentId"] as? String) ?? "Captain"
+        let preview = text.count > 120 ? String(text.prefix(120)) + "..." : text
+        captainThought = CaptainThought(agentName: agentName, text: preview)
     }
 
     /// Decode a Codable type from an SSE payload dictionary.

@@ -149,6 +149,7 @@ struct ThreadListView: View {
             .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in
                 navigationPath = NavigationPath()
                 threadStore.threadPreviews.removeAll()
+                threadStore.captainThought = nil
                 Task {
                     await threadStore.loadThreads()
                     await threadStore.loadPreviews()
