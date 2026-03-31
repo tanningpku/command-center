@@ -38,6 +38,8 @@ function handle401() {
     state.eventSource.close();
     state.eventSource = null;
   }
+  // Stop health polling
+  stopHealthPoll();
 }
 
 // ── State ────────────────────────────────────────────────────────
@@ -1193,9 +1195,9 @@ function renderHealth(data) {
               <span class="cc-health-bridge-status" style="color: ${bColor}">${escapeHtml(bStatus.toUpperCase())}</span>
             </div>
             <div class="cc-health-bridge-actions">
-              ${isStopped ? `<button class="cc-health-btn cc-health-btn-start" data-action="start" data-agent="${escapeHtml(agentId)}">Start</button>` : ''}
-              <button class="cc-health-btn cc-health-btn-restart" data-action="restart" data-agent="${escapeHtml(agentId)}">Restart</button>
-              ${!isStopped ? `<button class="cc-health-btn cc-health-btn-stop" data-action="stop" data-agent="${escapeHtml(agentId)}">Stop</button>` : ''}
+              ${isStopped ? `<button class="cc-health-btn cc-health-btn-start" data-action="start" data-agent="${escapeHtml(agentId)}" data-project="${escapeHtml(projectId)}">Start</button>` : ''}
+              <button class="cc-health-btn cc-health-btn-restart" data-action="restart" data-agent="${escapeHtml(agentId)}" data-project="${escapeHtml(projectId)}">Restart</button>
+              ${!isStopped ? `<button class="cc-health-btn cc-health-btn-stop" data-action="stop" data-agent="${escapeHtml(agentId)}" data-project="${escapeHtml(projectId)}">Stop</button>` : ''}
             </div>
           </div>
           <div class="cc-health-bridge-meta">
@@ -1255,17 +1257,22 @@ function renderHealth(data) {
   container.innerHTML = html;
 }
 
-async function healthBridgeAction(action, agentId) {
+async function healthBridgeAction(action, agentId, projectId) {
   const actionLabels = { restart: 'Restarting', stop: 'Stopping', start: 'Starting' };
   const label = actionLabels[action] || action;
 
-  if (!confirm(`${label} bridge "${agentId}"?`)) return;
+  if (!confirm(`${label} bridge "${agentId}" (project: ${projectId || state.selectedProjectId})?`)) return;
 
+  // Temporarily set project context to the bridge's project for the API call
+  const prevProject = state.selectedProjectId;
+  if (projectId) state.selectedProjectId = projectId;
   try {
     await apiPost(`/api/health/bridges/${encodeURIComponent(agentId)}/${action}`, {});
     await loadHealthData(true);
   } catch (err) {
     alert(`Failed to ${action} bridge: ${err.message}`);
+  } finally {
+    state.selectedProjectId = prevProject;
   }
 }
 
@@ -2152,8 +2159,9 @@ document.getElementById('healthContainer').addEventListener('click', (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
   const agentId = btn.dataset.agent;
+  const projectId = btn.dataset.project;
   if (action && agentId) {
-    healthBridgeAction(action, agentId);
+    healthBridgeAction(action, agentId, projectId);
   } else if (btn.id === 'healthCleanupBtn') {
     healthCleanup();
   } else if (btn.id === 'healthRestartGwBtn') {
