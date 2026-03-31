@@ -92,6 +92,8 @@ export class Gateway {
   private readonly kbManagers: Map<string, KbManager> = new Map();
   /** Bridges keyed by "projectId:agentId" */
   private readonly claudeBridges: Map<string, ClaudeBridge> = new Map();
+  /** Bridges stopped by restart escalation — prevents ensureBridge from respawning them. */
+  private readonly escalationStoppedBridges: Set<string> = new Set();
   private readonly sseHub = new SseHub();
   /** Next available worker port per project */
   private readonly nextWorkerPort: Map<string, number> = new Map();
@@ -162,6 +164,20 @@ export class Gateway {
       // Backfill existing agents into the team broadcast thread
       this.backfillTeamParticipants(id);
       console.log(`[gateway] Stores initialized for ${id}`);
+    }
+
+    // Verify DB health for all stores
+    for (const [id] of this.projects) {
+      const stores = [
+        { name: "tasks", store: this.taskStores.get(id) },
+        { name: "agents", store: this.agentStores.get(id) },
+        { name: "threads", store: this.threadStores.get(id) },
+      ];
+      for (const { name, store } of stores) {
+        if (!store || !store.checkHealth()) {
+          console.error(`[gateway] DB health check FAILED for ${id}/${name} — store may be corrupt`);
+        }
+      }
     }
 
     // Initialize GitHub plugins for projects with repos
@@ -340,6 +356,7 @@ export class Gateway {
       // We publish agent_restarted for logging/alerting but don't duplicate
       // the bridge_status_changed event (ready handler covers that).
       this.sseHub.publish(projectId, "agent_restarted", { agentId, reason: info.reason });
+      this.postHealthAlert(projectId, `✅ Bridge **${agentId}** recovered — restarted successfully (reason: ${info.reason}).`);
     });
 
     bridge.on("watchdog_kill", (info: { agentId: string; sinceActivityMs: number }) => {
@@ -350,6 +367,33 @@ export class Gateway {
         timestamp: new Date().toISOString(),
       });
       this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "stuck", previousStatus: "ready" });
+      this.postHealthAlert(projectId, `⚠️ Bridge **${agentId}** appears stuck — no activity for ${Math.round(info.sinceActivityMs / 1000)}s. Auto-restarting.`);
+    });
+
+    bridge.on("idle_restart", (info: { agentId: string; sinceActivityMs: number }) => {
+      console.warn(`[gateway] Idle restart for ${projectId}/${info.agentId} (not ready, no activity for ${Math.round(info.sinceActivityMs / 1000)}s)`);
+      this.sseHub.publish(projectId, "bridge_idle_restart", {
+        agentId: info.agentId,
+        sinceActivityMs: info.sinceActivityMs,
+        timestamp: new Date().toISOString(),
+      });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "idle_restart", previousStatus: "disconnected" });
+      this.postHealthAlert(projectId, `⚠️ Bridge **${agentId}** idle — not ready for ${Math.round(info.sinceActivityMs / 1000)}s. Auto-restarting.`);
+    });
+
+    bridge.on("escalation_stop", (info: { agentId: string; restartCount: number; windowMs: number; lastReason: string }) => {
+      console.error(`[gateway] Escalation stop for ${projectId}/${info.agentId} — ${info.restartCount} restarts in ${info.windowMs / 1000}s`);
+      this.sseHub.publish(projectId, "bridge_escalation_stop", {
+        agentId: info.agentId,
+        restartCount: info.restartCount,
+        windowMs: info.windowMs,
+        lastReason: info.lastReason,
+        timestamp: new Date().toISOString(),
+      });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "escalation_stopped", previousStatus: "restarting" });
+      // Keep bridge in claudeBridges so health/status APIs can still report it as stopped
+      this.escalationStoppedBridges.add(compositeKey);
+      this.postHealthAlert(projectId, `🚨 Bridge **${agentId}** stopped — ${info.restartCount} restarts in ${Math.round(info.windowMs / 1000)}s (last: ${info.lastReason}). Manual intervention required.`);
     });
 
     this.claudeBridges.set(compositeKey, bridge);
@@ -512,6 +556,10 @@ export class Gateway {
   private async ensureBridge(projectId: string, agentId: string): Promise<ClaudeBridge | undefined> {
     const existing = this.resolveBridge(projectId, agentId);
     if (existing) return existing;
+
+    // Don't respawn bridges stopped by escalation — requires manual restart
+    const key = this.bridgeKey(projectId, agentId);
+    if (this.escalationStoppedBridges.has(key)) return undefined;
 
     const agentStore = this.agentStores.get(projectId);
     if (agentId !== "captain") {
@@ -991,6 +1039,20 @@ export class Gateway {
     this.sendJson(res, 201, { project: config });
   }
 
+  /** Post a health-related system message to the project's main thread. */
+  private postHealthAlert(projectId: string, content: string): void {
+    this.dispatchMessage({
+      projectId,
+      threadId: "main",
+      sender: { id: "system", type: "system" },
+      channel: "thread",
+      mode: "text",
+      content,
+      kind: "system",
+      source: "gateway",
+    });
+  }
+
   private handleHealthCheck(projectId: string, res: http.ServerResponse): void {
     const project = this.projects.get(projectId);
     if (!project) {
@@ -1136,9 +1198,16 @@ export class Gateway {
     }
 
     if (action === "start") {
-      if (this.claudeBridges.has(key)) { this.sendJson(res, 409, { error: `Bridge for ${agentId} is already running` }); return; }
+      // For escalation-stopped bridges, the old bridge is still in the map — remove it first
+      const stale = this.claudeBridges.get(key);
+      if (stale && !this.escalationStoppedBridges.has(key)) {
+        this.sendJson(res, 409, { error: `Bridge for ${agentId} is already running` });
+        return;
+      }
+      if (stale) { this.claudeBridges.delete(key); }
       try {
         await this.startAgentBridge(projectId, project, agentId);
+        this.escalationStoppedBridges.delete(key);
         this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "connecting", previousStatus: "stopped" });
         this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "starting" });
       } catch (err) {
@@ -1155,6 +1224,7 @@ export class Gateway {
       }
       try {
         await this.startAgentBridge(projectId, project, agentId);
+        this.escalationStoppedBridges.delete(key);
         this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "restarting", previousStatus: existing ? "ready" : "stopped" });
         this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "restarting" });
       } catch (err) {
