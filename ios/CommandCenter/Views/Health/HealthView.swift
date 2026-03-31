@@ -1,12 +1,21 @@
 import SwiftUI
 
+private enum RecoveryAction: Identifiable {
+    case restartGateway, cleanup
+    var id: String {
+        switch self {
+        case .restartGateway: "restartGateway"
+        case .cleanup: "cleanup"
+        }
+    }
+}
+
 /// Main Health tab view showing system status, bridges, stores, and recovery actions.
 struct HealthView: View {
     @Environment(HealthStore.self) var healthStore
     @Environment(ProjectStore.self) var projectStore
 
-    @State private var showRestartGatewayAlert = false
-    @State private var showCleanupAlert = false
+    @State private var confirmAction: RecoveryAction?
 
     var body: some View {
         NavigationStack {
@@ -35,8 +44,7 @@ struct HealthView: View {
                             )
                             SSEStatusCard(sse: data.sse)
                             RecoveryActionsSection(
-                                showRestartGateway: $showRestartGatewayAlert,
-                                showCleanup: $showCleanupAlert
+                                confirmAction: $confirmAction
                             )
                         }
                         .padding()
@@ -66,21 +74,27 @@ struct HealthView: View {
                     }
                 }
             }
-            .alert("Restart Gateway", isPresented: $showRestartGatewayAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Restart", role: .destructive) {
-                    Task { await healthStore.restartGateway() }
+            .alert(item: $confirmAction) { action in
+                switch action {
+                case .restartGateway:
+                    Alert(
+                        title: Text("Restart Gateway"),
+                        message: Text("This will restart the entire gateway process. All bridges will disconnect and reconnect. Are you sure?"),
+                        primaryButton: .destructive(Text("Restart")) {
+                            Task { await healthStore.restartGateway() }
+                        },
+                        secondaryButton: .cancel()
+                    )
+                case .cleanup:
+                    Alert(
+                        title: Text("Clean Up Stale Processes"),
+                        message: Text("This will kill any orphaned claude processes that are no longer managed by the gateway."),
+                        primaryButton: .destructive(Text("Clean Up")) {
+                            Task { await healthStore.cleanupStale() }
+                        },
+                        secondaryButton: .cancel()
+                    )
                 }
-            } message: {
-                Text("This will restart the entire gateway process. All bridges will disconnect and reconnect. Are you sure?")
-            }
-            .alert("Clean Up Stale Processes", isPresented: $showCleanupAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Clean Up", role: .destructive) {
-                    Task { await healthStore.cleanupStale() }
-                }
-            } message: {
-                Text("This will kill any orphaned claude processes that are no longer managed by the gateway.")
             }
             .overlay(alignment: .bottom) {
                 if let result = healthStore.actionResult {
@@ -162,7 +176,7 @@ private struct BridgeListSection: View {
                     .padding(.vertical, 12)
             } else {
                 ForEach(bridges) { bridge in
-                    NavigationLink(value: bridge) {
+                    NavigationLink(value: bridge.agentId) {
                         BridgeRowView(bridge: bridge)
                     }
                     .buttonStyle(.plain)
@@ -184,8 +198,8 @@ private struct BridgeListSection: View {
                 }
             }
         }
-        .navigationDestination(for: BridgeHealth.self) { bridge in
-            BridgeDetailView(bridge: bridge)
+        .navigationDestination(for: String.self) { agentId in
+            BridgeDetailView(agentId: agentId)
         }
     }
 }
@@ -310,8 +324,7 @@ private struct SSEStatusCard: View {
 
 private struct RecoveryActionsSection: View {
     @Environment(HealthStore.self) var healthStore
-    @Binding var showRestartGateway: Bool
-    @Binding var showCleanup: Bool
+    @Binding var confirmAction: RecoveryAction?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -321,7 +334,7 @@ private struct RecoveryActionsSection: View {
 
             HStack(spacing: 12) {
                 Button {
-                    showCleanup = true
+                    confirmAction = .cleanup
                 } label: {
                     Label("Clean Up Stale", systemImage: "trash")
                         .font(.subheadline)
@@ -331,7 +344,7 @@ private struct RecoveryActionsSection: View {
                 .disabled(healthStore.isPerformingAction)
 
                 Button {
-                    showRestartGateway = true
+                    confirmAction = .restartGateway
                 } label: {
                     Label("Restart Gateway", systemImage: "arrow.clockwise")
                         .font(.subheadline)
