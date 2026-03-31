@@ -67,7 +67,7 @@ struct MessageBubbleView: View {
                         .foregroundStyle(.tertiary)
                 }
 
-                if message.isUser {
+                if !message.isUser {
                     Spacer(minLength: 48)
                 }
             }
