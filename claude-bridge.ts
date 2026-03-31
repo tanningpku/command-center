@@ -471,6 +471,12 @@ export class ClaudeBridge extends EventEmitter {
     setTimeout(() => {
       this.autoRestartPending = false;
       if (this.stopped) return;
+      // If bridge recovered during the backoff window, skip the restart
+      if (this.isReady()) {
+        console.log(`[${this.tag}] Bridge recovered during backoff — cancelling restart (reason: ${reason})`);
+        this.backoffMs = 1_000;
+        return;
+      }
       this.intentionalRestart = true;
       this._restartCount++;
       this._lastRestartReason = reason;
