@@ -214,6 +214,41 @@ actor APIService {
     func checkStatus() async throws -> StatusResponse {
         try await fetch("api/status")
     }
+
+    // MARK: - Health
+
+    func fetchHealth() async throws -> HealthData {
+        // Health endpoint is global (no project scope needed)
+        let saved = projectId
+        projectId = nil
+        defer { projectId = saved }
+        return try await fetch("api/health")
+    }
+
+    func restartBridge(agentId: String, reason: String? = nil) async throws -> RecoveryActionResponse {
+        struct Body: Encodable { let reason: String? }
+        return try await post("api/health/bridges/\(agentId)/restart", body: Body(reason: reason ?? "manual restart"))
+    }
+
+    func stopBridge(agentId: String) async throws -> RecoveryActionResponse {
+        struct Body: Encodable { let reason: String? }
+        return try await post("api/health/bridges/\(agentId)/stop", body: Body(reason: "manual stop"))
+    }
+
+    func startBridge(agentId: String) async throws -> RecoveryActionResponse {
+        struct Body: Encodable { let reason: String? }
+        return try await post("api/health/bridges/\(agentId)/start", body: Body(reason: nil))
+    }
+
+    func cleanupStaleProcesses() async throws -> RecoveryActionResponse {
+        struct Empty: Encodable {}
+        return try await post("api/health/cleanup", body: Empty())
+    }
+
+    func restartGateway() async throws -> RecoveryActionResponse {
+        struct Empty: Encodable {}
+        return try await post("api/restart", body: Empty())
+    }
 }
 
 // MARK: - Response types

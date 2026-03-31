@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Root view with 4 tabs: Home, Team, Board, Threads.
+/// Root view with 5 tabs: Home, Team, Board, Threads, Health.
 struct MainTabView: View {
     @Environment(NavigationRouter.self) var router
     @Environment(ProjectStore.self) var projectStore
@@ -24,6 +24,10 @@ struct MainTabView: View {
             ThreadListView()
                 .tag(NavigationRouter.Tab.threads)
                 .tabItem { Label("Threads", systemImage: "bubble.left.and.bubble.right") }
+
+            HealthView()
+                .tag(NavigationRouter.Tab.health)
+                .tabItem { Label("Health", systemImage: "heart.text.square") }
         }
         .onChange(of: router.selectedTab) { _, _ in
             HapticManager.selection()

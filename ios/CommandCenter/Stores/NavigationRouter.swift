@@ -5,7 +5,7 @@ import SwiftUI
 @Observable
 class NavigationRouter {
     enum Tab: String, CaseIterable {
-        case home, team, board, threads
+        case home, team, board, threads, health
 
         var label: String {
             switch self {
@@ -13,6 +13,7 @@ class NavigationRouter {
             case .team: "Team"
             case .board: "Board"
             case .threads: "Threads"
+            case .health: "Health"
             }
         }
 
@@ -22,6 +23,7 @@ class NavigationRouter {
             case .team: "person.3"
             case .board: "rectangle.split.3x1"
             case .threads: "bubble.left.and.bubble.right"
+            case .health: "heart.text.square"
             }
         }
     }
