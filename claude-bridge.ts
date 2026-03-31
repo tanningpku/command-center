@@ -16,83 +16,50 @@ import { WebSocket, WebSocketServer } from "ws";
 /* ------------------------------------------------------------------ */
 
 /**
- * Check the command line of a PID to see if it's a claude CLI process.
- * Returns true if the process cmdline contains "claude" and "--sdk-url".
+ * Check if a PID is orphaned (its parent process no longer exists, so it
+ * was reparented to PID 1/init). Orphaned processes from a prior gateway
+ * run are safe to kill since their parent is gone.
  */
-function isClaudeProcess(pid: number): boolean {
+function isOrphaned(pid: number): boolean {
   try {
-    const cmdline = execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", timeout: 3_000 }).trim();
-    return cmdline.includes("claude") && cmdline.includes("--sdk-url");
+    const ppid = Number(execSync(`ps -p ${pid} -o ppid=`, { encoding: "utf-8", timeout: 3_000 }).trim());
+    return ppid === 1;
   } catch {
     return false;
   }
 }
 
 /**
- * Find PIDs listening on a given port via lsof. Returns an array of PIDs.
+ * Describe what's on a port for error messages. Returns a human-readable
+ * string like "PID 1234 (node dist/index.js)".
  */
-function findPidsOnPort(port: number): number[] {
+export function describePortOccupant(port: number): string {
   try {
     const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf-8", timeout: 5_000 });
-    return out.trim().split("\n").map(Number).filter((n) => !isNaN(n) && n > 0);
-  } catch {
-    return []; // lsof exits non-zero when no matches
-  }
-}
-
-/**
- * Get the command line of a PID for logging. Returns empty string on failure.
- */
-function getProcessCmdline(pid: number): string {
-  try {
-    return execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", timeout: 3_000 }).trim();
-  } catch {
-    return "";
-  }
-}
-
-/**
- * Check if a process command line looks like a stale gateway or claude process.
- */
-function isOwnedProcess(cmdline: string): boolean {
-  // Claude CLI bridge child
-  if (cmdline.includes("claude") && cmdline.includes("--sdk-url")) return true;
-  // Node gateway process (our own binary or tsx/node running gateway/index)
-  if ((cmdline.includes("node") || cmdline.includes("tsx")) &&
-      (cmdline.includes("gateway") || cmdline.includes("index") || cmdline.includes("command-center"))) return true;
-  return false;
-}
-
-/**
- * Attempt to free a port held by a stale gateway or claude process.
- * Only sends SIGTERM to processes confirmed as owned (gateway node process
- * or claude CLI). Returns true if a process was signaled.
- */
-export function freePort(port: number): boolean {
-  const pids = findPidsOnPort(port);
-  for (const pid of pids) {
-    if (pid === process.pid) continue;
-    const cmd = getProcessCmdline(pid);
-    if (!cmd || !isOwnedProcess(cmd)) {
-      console.warn(`[bridge-cleanup] Port ${port} held by unknown PID ${pid}: ${cmd || "(unknown)"} — not killing`);
-      continue;
+    const pids = out.trim().split("\n").map(Number).filter((n) => !isNaN(n) && n > 0);
+    if (pids.length === 0) return "(no process found)";
+    const descs: string[] = [];
+    for (const pid of pids) {
+      try {
+        const cmd = execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", timeout: 3_000 }).trim();
+        descs.push(`PID ${pid} (${cmd})`);
+      } catch {
+        descs.push(`PID ${pid}`);
+      }
     }
-    console.warn(`[bridge-cleanup] Port ${port} held by stale PID ${pid}: ${cmd}`);
-    try {
-      process.kill(pid, "SIGTERM");
-      console.log(`[bridge-cleanup] Sent SIGTERM to PID ${pid} on port ${port}`);
-      return true;
-    } catch {
-      // already gone
-    }
+    return descs.join(", ");
+  } catch {
+    return "(unable to determine)";
   }
-  return false;
 }
 
 /**
- * Find and kill stale claude CLI processes whose --sdk-url matches any of the
- * given WS ports. Used at gateway startup to clean up zombies from prior runs.
- * Each candidate PID is verified via isClaudeProcess() before being killed.
+ * Find and kill orphaned claude CLI processes whose --sdk-url matches any of
+ * the given WS ports. Only kills processes that are:
+ * 1. Confirmed claude CLI (command line contains "claude" and "--sdk-url")
+ * 2. Confirmed orphaned (PPID = 1, reparented to init after parent gateway died)
+ *
+ * This avoids killing healthy bridges belonging to a still-running gateway.
  */
 export function killStaleClaude(wsPorts: number[]): number {
   if (wsPorts.length === 0) return 0;
@@ -100,17 +67,20 @@ export function killStaleClaude(wsPorts: number[]): number {
   try {
     const out = execSync("ps aux", { encoding: "utf-8", timeout: 5_000 });
     for (const line of out.split("\n")) {
-      if (!line.includes("--sdk-url")) continue;
+      if (!line.includes("claude") || !line.includes("--sdk-url")) continue;
       for (const port of wsPorts) {
         if (line.includes(`ws://localhost:${port}/claude`)) {
           const parts = line.trim().split(/\s+/);
           const pid = Number(parts[1]);
           if (!pid || pid === process.pid) continue;
-          if (!isClaudeProcess(pid)) continue;
+          if (!isOrphaned(pid)) {
+            console.log(`[bridge-cleanup] claude PID ${pid} (port ${port}) has a live parent — skipping`);
+            continue;
+          }
           try {
             process.kill(pid, "SIGKILL");
             killed++;
-            console.log(`[bridge-cleanup] Killed stale claude PID ${pid} (port ${port})`);
+            console.log(`[bridge-cleanup] Killed orphaned claude PID ${pid} (port ${port})`);
           } catch {
             // already gone
           }
@@ -281,8 +251,9 @@ export class ClaudeBridge extends EventEmitter {
   }
 
   /**
-   * Attempt to bind the WebSocket server. On EADDRINUSE, attempt to free the
-   * port (typically held by a stale gateway process) and retry.
+   * Attempt to bind the WebSocket server. On EADDRINUSE, wait and retry
+   * (handles transient port conflicts during gateway restart). After all
+   * retries, includes diagnostics about what holds the port.
    */
   private async listenWithRetry(): Promise<void> {
     for (let attempt = 1; attempt <= ClaudeBridge.MAX_PORT_RETRIES; attempt++) {
@@ -292,14 +263,17 @@ export class ClaudeBridge extends EventEmitter {
         return;
       } catch (err: unknown) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "EADDRINUSE" || attempt === ClaudeBridge.MAX_PORT_RETRIES) {
-          throw err;
+        if (code !== "EADDRINUSE") throw err;
+        if (attempt === ClaudeBridge.MAX_PORT_RETRIES) {
+          const occupant = describePortOccupant(this.opts.wsPort);
+          throw new Error(
+            `EADDRINUSE: port ${this.opts.wsPort} is held by ${occupant}. ` +
+            `Stop the other process or change the project port config.`,
+          );
         }
         console.warn(
-          `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Attempting to free port...`,
+          `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Retrying in ${attempt}s...`,
         );
-        freePort(this.opts.wsPort);
-        // Wait for the OS to release the port after SIGTERM
         await new Promise((r) => setTimeout(r, 1_000 * attempt));
       }
     }
