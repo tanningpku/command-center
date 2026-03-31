@@ -98,7 +98,9 @@ struct HealthView: View {
             }
             .overlay(alignment: .bottom) {
                 if let result = healthStore.actionResult {
-                    ActionResultBanner(text: result)
+                    ActionResultBanner(text: result) {
+                        healthStore.actionResult = nil
+                    }
                 }
             }
             .onAppear { healthStore.startPolling() }
@@ -362,25 +364,21 @@ private struct RecoveryActionsSection: View {
 
 private struct ActionResultBanner: View {
     let text: String
-    @State private var isVisible = true
+    var onDismiss: () -> Void
 
     var body: some View {
-        if isVisible {
-            Text(text)
-                .font(.subheadline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-                .clipShape(Capsule())
-                .shadow(radius: 4)
-                .padding(.bottom, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .onAppear {
-                    Task {
-                        try? await Task.sleep(for: .seconds(3))
-                        withAnimation { isVisible = false }
-                    }
-                }
-        }
+        Text(text)
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .shadow(radius: 4)
+            .padding(.bottom, 8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: text) {
+                try? await Task.sleep(for: .seconds(3))
+                withAnimation { onDismiss() }
+            }
     }
 }

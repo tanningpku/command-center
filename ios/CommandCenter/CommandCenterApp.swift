@@ -65,6 +65,7 @@ struct CommandCenterApp: App {
                 await threadStore.loadThreads()
                 await boardStore.loadTasks()
                 await teamStore.loadAgents()
+                await healthStore.loadHealth()
             }
         }
     }
