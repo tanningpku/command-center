@@ -73,6 +73,7 @@ struct CommandCenterApp: App {
     private func reconnectSSE() {
         guard let projectId = projectStore.selectedId,
               let baseURL = AppConfig.baseURL else { return }
+        healthStore.activeProjectId = projectId
         threadStore.connectSSE(baseURL: baseURL, projectId: projectId)
     }
 }

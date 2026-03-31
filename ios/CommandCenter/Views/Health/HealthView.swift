@@ -103,8 +103,17 @@ struct HealthView: View {
                     }
                 }
             }
-            .onAppear { healthStore.startPolling() }
-            .onDisappear { healthStore.stopPolling() }
+            .task {
+                // .task cancels when the NavigationStack is removed (tab switch),
+                // but NOT on push to BridgeDetailView — keeps polling alive.
+                healthStore.startPolling()
+                // Wait for cancellation, then stop polling
+                await withTaskCancellationHandler {
+                    try? await Task.sleep(for: .seconds(.max))
+                } onCancel: {
+                    Task { @MainActor in healthStore.stopPolling() }
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in
                 Task { await healthStore.loadHealth() }
             }

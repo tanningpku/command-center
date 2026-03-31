@@ -12,6 +12,9 @@ class HealthStore {
     var isPerformingAction = false
     var actionResult: String?
 
+    /// The project ID that the SSE stream is scoped to
+    var activeProjectId: String?
+
     private let api: APIService
     private var pollTask: Task<Void, Never>?
 
@@ -79,22 +82,22 @@ class HealthStore {
     }
 
     /// Optimistically patch a bridge's status in the cached health data.
+    /// Scoped to activeProjectId since SSE events are project-scoped.
     private func applyBridgeStatus(agentId: String, status: BridgeStatus) {
-        guard var data = healthData else { return }
-        for (projectId, var project) in data.projects {
-            if var bridge = project.bridges[agentId] {
-                let updated = BridgeHealth(
-                    agentId: agentId,
-                    status: status,
-                    ready: status == .ready,
-                    bridge: bridge
-                )
-                project.bridges[agentId] = updated
-                data.projects[projectId] = project
-                healthData = data
-                return
-            }
-        }
+        guard var data = healthData,
+              let projectId = activeProjectId,
+              var project = data.projects[projectId],
+              project.bridges[agentId] != nil else { return }
+        let bridge = project.bridges[agentId]!
+        let updated = BridgeHealth(
+            agentId: agentId,
+            status: status,
+            ready: status == .ready,
+            bridge: bridge
+        )
+        project.bridges[agentId] = updated
+        data.projects[projectId] = project
+        healthData = data
     }
 
     // MARK: - Recovery actions
