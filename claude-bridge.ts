@@ -6,10 +6,93 @@
  *
  * Reference: companion/src/core/claude-server.ts + protocol.ts
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { WebSocket, WebSocketServer } from "ws";
+
+/* ------------------------------------------------------------------ */
+/*  Port cleanup utilities                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Check if a PID is orphaned (its parent process no longer exists, so it
+ * was reparented to PID 1/init). Orphaned processes from a prior gateway
+ * run are safe to kill since their parent is gone.
+ */
+function isOrphaned(pid: number): boolean {
+  try {
+    const ppid = Number(execSync(`ps -p ${pid} -o ppid=`, { encoding: "utf-8", timeout: 3_000 }).trim());
+    return ppid === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Describe what's on a port for error messages. Returns a human-readable
+ * string like "PID 1234 (node dist/index.js)".
+ */
+export function describePortOccupant(port: number): string {
+  try {
+    const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf-8", timeout: 5_000 });
+    const pids = out.trim().split("\n").map(Number).filter((n) => !isNaN(n) && n > 0);
+    if (pids.length === 0) return "(no process found)";
+    const descs: string[] = [];
+    for (const pid of pids) {
+      try {
+        const cmd = execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", timeout: 3_000 }).trim();
+        descs.push(`PID ${pid} (${cmd})`);
+      } catch {
+        descs.push(`PID ${pid}`);
+      }
+    }
+    return descs.join(", ");
+  } catch {
+    return "(unable to determine)";
+  }
+}
+
+/**
+ * Find and kill orphaned claude CLI processes whose --sdk-url matches any of
+ * the given WS ports. Only kills processes that are:
+ * 1. Confirmed claude CLI (command line contains "claude" and "--sdk-url")
+ * 2. Confirmed orphaned (PPID = 1, reparented to init after parent gateway died)
+ *
+ * This avoids killing healthy bridges belonging to a still-running gateway.
+ */
+export function killStaleClaude(wsPorts: number[]): number {
+  if (wsPorts.length === 0) return 0;
+  let killed = 0;
+  try {
+    const out = execSync("ps aux", { encoding: "utf-8", timeout: 5_000 });
+    for (const line of out.split("\n")) {
+      if (!line.includes("claude") || !line.includes("--sdk-url")) continue;
+      for (const port of wsPorts) {
+        if (line.includes(`ws://localhost:${port}/claude`)) {
+          const parts = line.trim().split(/\s+/);
+          const pid = Number(parts[1]);
+          if (!pid || pid === process.pid) continue;
+          if (!isOrphaned(pid)) {
+            console.log(`[bridge-cleanup] claude PID ${pid} (port ${port}) has a live parent — skipping`);
+            continue;
+          }
+          try {
+            process.kill(pid, "SIGKILL");
+            killed++;
+            console.log(`[bridge-cleanup] Killed orphaned claude PID ${pid} (port ${port})`);
+          } catch {
+            // already gone
+          }
+          break;
+        }
+      }
+    }
+  } catch {
+    // ps not available or failed — non-fatal
+  }
+  return killed;
+}
 
 /* ------------------------------------------------------------------ */
 /*  NDJSON Protocol (ported from companion/src/core/protocol.ts)       */
@@ -153,11 +236,11 @@ export class ClaudeBridge extends EventEmitter {
     super();
   }
 
+  private static readonly MAX_PORT_RETRIES = 3;
+
   async start(): Promise<void> {
     this.stopped = false;
-    this.wss = new WebSocketServer({ port: this.opts.wsPort, path: "/claude" });
-    this.wss.on("connection", (socket) => this.onConnection(socket));
-    console.log(`[${this.tag}] WS server listening on port ${this.opts.wsPort}`);
+    await this.listenWithRetry();
 
     if (this.opts.mockClaude) {
       console.log(`[${this.tag}] MOCK mode — no subprocess`);
@@ -165,6 +248,51 @@ export class ClaudeBridge extends EventEmitter {
     }
     this.spawnChild();
     this.startWatchdog();
+  }
+
+  /**
+   * Attempt to bind the WebSocket server. On EADDRINUSE, wait and retry
+   * (handles transient port conflicts during gateway restart). After all
+   * retries, includes diagnostics about what holds the port.
+   */
+  private async listenWithRetry(): Promise<void> {
+    for (let attempt = 1; attempt <= ClaudeBridge.MAX_PORT_RETRIES; attempt++) {
+      try {
+        await this.bindWss();
+        console.log(`[${this.tag}] WS server listening on port ${this.opts.wsPort}`);
+        return;
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "EADDRINUSE") throw err;
+        if (attempt === ClaudeBridge.MAX_PORT_RETRIES) {
+          const occupant = describePortOccupant(this.opts.wsPort);
+          throw new Error(
+            `EADDRINUSE: port ${this.opts.wsPort} is held by ${occupant}. ` +
+            `Stop the other process or change the project port config.`,
+          );
+        }
+        console.warn(
+          `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Retrying in ${attempt}s...`,
+        );
+        await new Promise((r) => setTimeout(r, 1_000 * attempt));
+      }
+    }
+  }
+
+  /** Create a WebSocketServer and wait for it to be listening (or error). */
+  private bindWss(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const wss = new WebSocketServer({ port: this.opts.wsPort, path: "/claude" });
+      wss.on("listening", () => {
+        this.wss = wss;
+        wss.on("connection", (socket) => this.onConnection(socket));
+        resolve();
+      });
+      wss.on("error", (err) => {
+        wss.close();
+        reject(err);
+      });
+    });
   }
 
   stop(): void {

@@ -18,7 +18,7 @@ import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
 import { AgentStore, CAPTAIN_IDENTITY, CAPTAIN_TOOLS } from "./agent-store.js";
 import { ThreadStore } from "./thread-store.js";
-import { ClaudeBridge, type AssistantTextPayload, type ResultPayload } from "./claude-bridge.js";
+import { ClaudeBridge, killStaleClaude, type AssistantTextPayload, type ResultPayload } from "./claude-bridge.js";
 import { SseHub } from "./sse-hub.js";
 import { KbManager } from "./kb-manager.js";
 
@@ -170,6 +170,9 @@ export class Gateway {
       }
     }
 
+    // Clean up stale bridge processes from prior runs
+    this.cleanupStaleBridges();
+
     // Start captain bridges for each project
     for (const [id, project] of this.projects) {
       if (project.status === "inactive") continue;
@@ -204,6 +207,34 @@ export class Gateway {
   /* ---------------------------------------------------------------- */
   /*  Claude Bridge lifecycle                                          */
   /* ---------------------------------------------------------------- */
+
+  /**
+   * Kill stale claude CLI processes from prior gateway runs.
+   * Only targets processes confirmed to be claude CLI instances via their
+   * command-line arguments (--sdk-url matching our expected WS ports).
+   * Called once at startup before any bridges are created.
+   */
+  private cleanupStaleBridges(): void {
+    // Collect all WS ports we'll need (captain ports + known agent ports)
+    const wsPorts: number[] = [];
+    for (const [id, project] of this.projects) {
+      if (project.status === "inactive") continue;
+      wsPorts.push(project.port + 10000);
+      const agentStore = this.agentStores.get(id);
+      if (agentStore) {
+        let workerPort = project.port + 10100;
+        for (const agent of agentStore.list()) {
+          if (agent.id === "captain") continue;
+          wsPorts.push(workerPort++);
+        }
+      }
+    }
+
+    const killed = killStaleClaude(wsPorts);
+    if (killed > 0) {
+      console.log(`[gateway] Cleaned up ${killed} stale claude process(es)`);
+    }
+  }
 
   private async startAgentBridge(projectId: string, project: ProjectConfig, agentId: string): Promise<ClaudeBridge> {
     const projectDir = project.directory || this.dataDir;
