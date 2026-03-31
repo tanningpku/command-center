@@ -58,12 +58,10 @@ struct ThreadListView: View {
                             NavigationLink(value: thread) {
                                 ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    threadToDelete = thread
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+                        }
+                        .onDelete { offsets in
+                            if let idx = offsets.first {
+                                threadToDelete = activeThreads[idx]
                             }
                         }
 
@@ -76,12 +74,10 @@ struct ThreadListView: View {
                                             ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
                                         }
                                         .opacity(0.6)
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                            Button(role: .destructive) {
-                                                threadToDelete = thread
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
+                                    }
+                                    .onDelete { offsets in
+                                        if let idx = offsets.first {
+                                            threadToDelete = completedThreads[idx]
                                         }
                                     }
                                 }
