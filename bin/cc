@@ -621,6 +621,128 @@ print(f'{display_name} | Tasks: {tasks_summary} | Agents: {agents_summary}')
 " 2>/dev/null || echo "[cc] status: could not fetch data (is gateway running?)"
     ;;
 
+  # ── Health commands ───────────────────────────────────────────
+  health)
+    case "${2:-summary}" in
+      cleanup)
+        json_post "/api/health/cleanup" "{}"
+        ;;
+      summary|--json)
+        HEALTH_JSON=$(json_get "/api/health" 2>/dev/null)
+        # Check for error
+        if echo "$HEALTH_JSON" | jq -e '.error' >/dev/null 2>&1; then
+          echo "$HEALTH_JSON"
+          exit 1
+        fi
+        # Raw JSON mode
+        if [ "${2:-}" = "--json" ]; then
+          echo "$HEALTH_JSON" | jq .
+          exit 0
+        fi
+        # Formatted summary
+        echo "$HEALTH_JSON" | python3 -c "
+import json, sys
+
+d = json.load(sys.stdin)
+status = d.get('status', 'unknown').upper()
+uptime = d.get('uptime_seconds', 0)
+h, rem = divmod(int(uptime), 3600)
+m, s = divmod(rem, 60)
+uptime_str = f'{h}h {m}m {s}s' if h else f'{m}m {s}s'
+
+mem = d.get('memory', {})
+rss = mem.get('rss_mb', '?')
+heap = mem.get('heap_used_mb', '?')
+
+print(f'System: {status} | Uptime: {uptime_str} | Memory: {rss}MB RSS / {heap}MB Heap')
+
+# Bridges per project
+projects = d.get('projects', {})
+for pid, proj in projects.items():
+    if len(projects) > 1:
+        print(f'[{pid}]')
+    bridges = proj.get('bridges', {})
+    for aid, b in bridges.items():
+        bstatus = b.get('status', 'unknown').upper()
+        bup = b.get('uptime_seconds', 0)
+        bh, brem = divmod(int(bup), 3600)
+        bm, bs = divmod(brem, 60)
+        bup_str = f'{bh}h {bm}m' if bh else f'{bm}m {bs}s'
+        restarts = b.get('restart_count', 0)
+        print(f'  {aid}: {bstatus} ({bup_str}, {restarts} restarts)')
+
+    # Stores
+    stores = proj.get('stores', {})
+    store_parts = []
+    for sname, sinfo in stores.items():
+        ok = 'OK' if sinfo.get('ok') else 'FAIL'
+        store_parts.append(f'{sname}: {ok}')
+    if store_parts:
+        print(f'  Stores: {\" | \".join(store_parts)}')
+
+sse = d.get('sse', {})
+clients = sse.get('connected_clients', '?')
+buf = sse.get('buffer_size', '?')
+print(f'  SSE: {clients} clients | Buffer: {buf}')
+" 2>/dev/null || echo "$HEALTH_JSON"
+        ;;
+      *) echo "Usage: cc health [--json | cleanup]"; exit 2;;
+    esac
+    ;;
+
+  # ── Bridge commands ──────────────────────────────────────────
+  bridge)
+    case "${2:-list}" in
+      list)
+        BRIDGES_JSON=$(json_get "/api/health/bridges" 2>/dev/null)
+        if echo "$BRIDGES_JSON" | jq -e '.error' >/dev/null 2>&1; then
+          echo "$BRIDGES_JSON"
+          exit 1
+        fi
+        echo "$BRIDGES_JSON" | python3 -c "
+import json, sys
+
+d = json.load(sys.stdin)
+bridges = d.get('bridges', [])
+if not bridges:
+    print('No bridges found.')
+    sys.exit(0)
+
+for b in bridges:
+    aid = b.get('agent_id', '?')
+    status = b.get('status', 'unknown').upper()
+    uptime = b.get('uptime_seconds', 0)
+    h, rem = divmod(int(uptime), 3600)
+    m, s = divmod(rem, 60)
+    up_str = f'{h}h {m}m' if h else f'{m}m {s}s'
+    restarts = b.get('restart_count', 0)
+    last = b.get('last_activity_at', '')
+    reason = b.get('last_restart_reason', '')
+    line = f'{aid}: {status} (uptime {up_str}, {restarts} restarts)'
+    if reason:
+        line += f' [last restart: {reason}]'
+    print(line)
+" 2>/dev/null || echo "$BRIDGES_JSON"
+        ;;
+      restart|stop|start)
+        ACTION="$2"
+        shift 2
+        BAGENT=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --agent) BAGENT="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$BAGENT" ] && echo "Error: --agent is required" && exit 2
+        BODY="{}"
+        [ "$ACTION" = "restart" ] && BODY='{"reason":"manual restart via CLI"}'
+        json_post "/api/health/bridges/$BAGENT/$ACTION" "$BODY"
+        ;;
+      *) echo "Usage: cc bridge <list|restart|stop|start> [--agent <id>]"; exit 2;;
+    esac
+    ;;
+
   # ── Gateway lifecycle ─────────────────────────────────────────
   start)
     cd "$DIR"
@@ -740,6 +862,17 @@ print(f'{display_name} | Tasks: {tasks_summary} | Agents: {agents_summary}')
     echo "  ops           Show CI builds and open PRs"
     echo "  metrics       Show task metrics"
     echo "  status        Show overall status"
+    echo ""
+    echo "Health & Monitoring:"
+    echo "  health        Show system health summary (bridges, stores, SSE)"
+    echo "  health --json Full health data as raw JSON"
+    echo "  health cleanup Kill stale/orphaned claude processes"
+    echo ""
+    echo "Bridge Management:"
+    echo "  bridge list                    List all bridges with status"
+    echo "  bridge restart --agent <id>    Restart a specific bridge"
+    echo "  bridge stop    --agent <id>    Stop a specific bridge"
+    echo "  bridge start   --agent <id>    Start a stopped bridge"
     echo ""
     echo "iOS Build:"
     echo "  ios-build     Build iOS app via SSH to Mac"
