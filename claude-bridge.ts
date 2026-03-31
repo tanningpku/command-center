@@ -16,6 +16,19 @@ import { WebSocket, WebSocketServer } from "ws";
 /* ------------------------------------------------------------------ */
 
 /**
+ * Check the command line of a PID to see if it's a claude CLI process.
+ * Returns true if the process cmdline contains "claude" and "--sdk-url".
+ */
+function isClaudeProcess(pid: number): boolean {
+  try {
+    const cmdline = execSync(`ps -p ${pid} -o args=`, { encoding: "utf-8", timeout: 3_000 }).trim();
+    return cmdline.includes("claude") && cmdline.includes("--sdk-url");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Find PIDs listening on a given port via lsof. Returns an array of PIDs.
  */
 function findPidsOnPort(port: number): number[] {
@@ -28,18 +41,23 @@ function findPidsOnPort(port: number): number[] {
 }
 
 /**
- * Kill any processes listening on the given port. Returns the number of
- * processes killed.
+ * Kill stale claude processes listening on the given port. Only kills processes
+ * confirmed to be claude CLI instances (by inspecting their command line).
+ * Returns the number of processes killed.
  */
-export function killProcessesOnPort(port: number): number {
+export function killClaudeOnPort(port: number): number {
   const pids = findPidsOnPort(port);
   let killed = 0;
   for (const pid of pids) {
-    if (pid === process.pid) continue; // never kill ourselves
+    if (pid === process.pid) continue;
+    if (!isClaudeProcess(pid)) {
+      console.log(`[bridge-cleanup] PID ${pid} on port ${port} is not a claude process — skipping`);
+      continue;
+    }
     try {
       process.kill(pid, "SIGKILL");
       killed++;
-      console.log(`[bridge-cleanup] Killed PID ${pid} on port ${port}`);
+      console.log(`[bridge-cleanup] Killed stale claude PID ${pid} on port ${port}`);
     } catch {
       // Process may have already exited
     }
@@ -254,7 +272,7 @@ export class ClaudeBridge extends EventEmitter {
         console.warn(
           `[${this.tag}] EADDRINUSE on port ${this.opts.wsPort} (attempt ${attempt}/${ClaudeBridge.MAX_PORT_RETRIES}). Killing occupant and retrying...`,
         );
-        killProcessesOnPort(this.opts.wsPort);
+        killClaudeOnPort(this.opts.wsPort);
         // Brief pause to let the OS release the port
         await new Promise((r) => setTimeout(r, 500 * attempt));
       }

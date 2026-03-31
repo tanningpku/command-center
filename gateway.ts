@@ -18,7 +18,7 @@ import { GitHubPlugin } from "./github-plugin.js";
 import { TaskStore } from "./task-store.js";
 import { AgentStore, CAPTAIN_IDENTITY, CAPTAIN_TOOLS } from "./agent-store.js";
 import { ThreadStore } from "./thread-store.js";
-import { ClaudeBridge, killStaleClaude, killProcessesOnPort, type AssistantTextPayload, type ResultPayload } from "./claude-bridge.js";
+import { ClaudeBridge, killStaleClaude, type AssistantTextPayload, type ResultPayload } from "./claude-bridge.js";
 import { SseHub } from "./sse-hub.js";
 import { KbManager } from "./kb-manager.js";
 
@@ -209,7 +209,9 @@ export class Gateway {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Kill stale claude processes and free WS ports from prior gateway runs.
+   * Kill stale claude CLI processes from prior gateway runs.
+   * Only targets processes confirmed to be claude CLI instances via their
+   * command-line arguments (--sdk-url matching our expected WS ports).
    * Called once at startup before any bridges are created.
    */
   private cleanupStaleBridges(): void {
@@ -217,9 +219,7 @@ export class Gateway {
     const wsPorts: number[] = [];
     for (const [id, project] of this.projects) {
       if (project.status === "inactive") continue;
-      // Captain port
       wsPorts.push(project.port + 10000);
-      // Kill anything on known agent WS ports from the agent store
       const agentStore = this.agentStores.get(id);
       if (agentStore) {
         let workerPort = project.port + 10100;
@@ -230,19 +230,9 @@ export class Gateway {
       }
     }
 
-    // 1. Kill stale claude CLI processes matching our WS ports
-    const staleKilled = killStaleClaude(wsPorts);
-    if (staleKilled > 0) {
-      console.log(`[gateway] Cleaned up ${staleKilled} stale claude process(es)`);
-    }
-
-    // 2. Free any occupied WS ports (non-claude processes or orphaned listeners)
-    let portsFreed = 0;
-    for (const port of wsPorts) {
-      portsFreed += killProcessesOnPort(port);
-    }
-    if (portsFreed > 0) {
-      console.log(`[gateway] Freed ${portsFreed} occupied WS port(s)`);
+    const killed = killStaleClaude(wsPorts);
+    if (killed > 0) {
+      console.log(`[gateway] Cleaned up ${killed} stale claude process(es)`);
     }
   }
 
