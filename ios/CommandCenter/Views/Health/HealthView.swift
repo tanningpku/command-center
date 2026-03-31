@@ -145,6 +145,7 @@ private struct StatItem: View {
 // MARK: - Bridge List Section
 
 private struct BridgeListSection: View {
+    @Environment(HealthStore.self) var healthStore
     let bridges: [BridgeHealth]
 
     var body: some View {
@@ -165,6 +166,21 @@ private struct BridgeListSection: View {
                         BridgeRowView(bridge: bridge)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        if bridge.status == .stopped {
+                            Button {
+                                Task { await healthStore.startBridge(agentId: bridge.agentId) }
+                            } label: {
+                                Label("Start", systemImage: "play.circle")
+                            }
+                        } else {
+                            Button {
+                                Task { await healthStore.restartBridge(agentId: bridge.agentId) }
+                            } label: {
+                                Label("Restart", systemImage: "arrow.clockwise")
+                            }
+                        }
+                    }
                 }
             }
         }

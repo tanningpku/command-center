@@ -62,9 +62,11 @@ class HealthStore {
             Task { await loadHealth() }
             HapticManager.light()
         case "health_alert":
-            // Could show a toast/banner — for now just reload
             Task { await loadHealth() }
             HapticManager.medium()
+        case "cleanup_completed":
+            Task { await loadHealth() }
+            HapticManager.light()
         default:
             break
         }
