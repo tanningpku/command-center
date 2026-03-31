@@ -228,6 +228,57 @@ export class ClaudeBridge extends EventEmitter {
   /** The thread that the most recent user message was sent in. */
   activeThreadId = "main";
 
+  /* ---- Metrics ---- */
+  private bridgeStartedAt = 0;
+  private _restartCount = 0;
+  private _lastRestartReason: string | null = null;
+  private _messagesReceived = 0;
+  private _messagesSent = 0;
+  private _errors = 0;
+
+  /** Return health diagnostics for this bridge. */
+  getHealthInfo(): {
+    agent_id: string;
+    status: string;
+    ready: boolean;
+    uptime_seconds: number;
+    started_at: string | null;
+    last_activity_at: string;
+    restart_count: number;
+    last_restart_reason: string | null;
+    ws_port: number;
+    active_thread_id: string;
+    pid: number | null;
+    messages_received: number;
+    messages_sent: number;
+    errors: number;
+  } {
+    const now = Date.now();
+    let status: string;
+    if (this.stopped) status = "stopped";
+    else if (this.autoRestartPending) status = "restarting";
+    else if (this.isReady()) status = "ready";
+    else if (this.child) status = "connecting";
+    else status = "disconnected";
+
+    return {
+      agent_id: this.opts.agentId ?? "captain",
+      status,
+      ready: this.isReady(),
+      uptime_seconds: this.bridgeStartedAt > 0 ? Math.floor((now - this.bridgeStartedAt) / 1000) : 0,
+      started_at: this.bridgeStartedAt > 0 ? new Date(this.bridgeStartedAt).toISOString() : null,
+      last_activity_at: new Date(this.lastActivityAt).toISOString(),
+      restart_count: this._restartCount,
+      last_restart_reason: this._lastRestartReason,
+      ws_port: this.opts.wsPort,
+      active_thread_id: this.activeThreadId,
+      pid: this.child?.pid ?? null,
+      messages_received: this._messagesReceived,
+      messages_sent: this._messagesSent,
+      errors: this._errors,
+    };
+  }
+
   private get tag(): string {
     return `claude-bridge:${this.opts.projectId}/${this.opts.agentId ?? "captain"}`;
   }
@@ -240,6 +291,7 @@ export class ClaudeBridge extends EventEmitter {
 
   async start(): Promise<void> {
     this.stopped = false;
+    this.bridgeStartedAt = Date.now();
     await this.listenWithRetry();
 
     if (this.opts.mockClaude) {
@@ -325,6 +377,7 @@ export class ClaudeBridge extends EventEmitter {
     if (context) parts.push(context);
     parts.push(`${sender ?? "User"}: ${text}`);
     this.send(buildUserMessage(parts.join("\n")));
+    this._messagesSent++;
     const ts = Date.now();
     this.lastUserMessageAt = ts;
     this.lastActivityAt = ts; // Reset so watchdog gives a full timeout window
@@ -383,6 +436,9 @@ export class ClaudeBridge extends EventEmitter {
       this.autoRestartPending = false;
       if (this.stopped) return;
       this.intentionalRestart = true;
+      this._restartCount++;
+      this._lastRestartReason = reason;
+      this.bridgeStartedAt = Date.now();
       this.killChild();
       this.spawnChild();
       const onReady = () => {
@@ -442,6 +498,7 @@ export class ClaudeBridge extends EventEmitter {
     });
 
     socket.on("error", (err) => {
+      this._errors++;
       console.error(`[${this.tag}] Socket error:`, err.message);
     });
 
@@ -461,6 +518,7 @@ export class ClaudeBridge extends EventEmitter {
 
     // Track activity for watchdog
     this.lastActivityAt = Date.now();
+    this._messagesReceived++;
 
     // Forward all raw messages as SSE events
     this.emit("message", message);

@@ -103,6 +103,24 @@ export class Gateway {
   private readonly authTokens: Set<string> = new Set();
   private readonly authPassword: string | undefined = process.env.CC_PASSWORD;
 
+  /* ---- Health metrics ---- */
+  private readonly gatewayStartedAt = Date.now();
+  private requestCount = 0;
+  private readonly errorTimestamps: number[] = [];
+
+  private trackError(): void {
+    this.errorTimestamps.push(Date.now());
+  }
+
+  private errorsLastHour(): number {
+    const cutoff = Date.now() - 3_600_000;
+    // Prune old entries
+    while (this.errorTimestamps.length > 0 && this.errorTimestamps[0] < cutoff) {
+      this.errorTimestamps.shift();
+    }
+    return this.errorTimestamps.length;
+  }
+
   constructor(opts: GatewayOptions) {
     this.port = opts.port;
     this.uiDir = opts.uiDir;
@@ -293,6 +311,7 @@ export class Gateway {
     // Wire bridge events — agentId captured in closure
     bridge.on("ready", () => {
       this.sseHub.publish(projectId, "claude_ready", { agentId, ready: true });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "ready", previousStatus: "connecting" });
       console.log(`[gateway] Claude ready for ${projectId}/${agentId}`);
     });
 
@@ -316,6 +335,13 @@ export class Gateway {
       });
     });
 
+    bridge.on("restarted", (info: { reason: string }) => {
+      // Note: "restarted" fires after "ready" — the bridge is already up.
+      // We publish agent_restarted for logging/alerting but don't duplicate
+      // the bridge_status_changed event (ready handler covers that).
+      this.sseHub.publish(projectId, "agent_restarted", { agentId, reason: info.reason });
+    });
+
     bridge.on("watchdog_kill", (info: { agentId: string; sinceActivityMs: number }) => {
       console.warn(`[gateway] Watchdog killed bridge for ${projectId}/${info.agentId} (no activity for ${Math.round(info.sinceActivityMs / 1000)}s)`);
       this.sseHub.publish(projectId, "bridge_watchdog_kill", {
@@ -323,6 +349,7 @@ export class Gateway {
         sinceActivityMs: info.sinceActivityMs,
         timestamp: new Date().toISOString(),
       });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "stuck", previousStatus: "ready" });
     });
 
     this.claudeBridges.set(compositeKey, bridge);
@@ -610,6 +637,8 @@ export class Gateway {
     const parsed = new URL(rawUrl, `http://localhost:${this.port}`);
     const pathname = parsed.pathname;
 
+    this.requestCount++;
+
     try {
       // --- Auth endpoints (always accessible) ---
       if (method === "POST" && pathname === "/api/login") {
@@ -691,6 +720,51 @@ export class Gateway {
           this.stop();
           process.exit(0);
         }, 500);
+        return;
+      }
+
+      // --- Health endpoints ---
+      if (method === "GET" && pathname === "/api/health") {
+        this.handleHealthDeep(res);
+        return;
+      }
+      if (method === "GET" && pathname === "/api/health/bridges") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        this.handleHealthBridges(projectId, res);
+        return;
+      }
+
+      // --- Recovery action endpoints ---
+      if (method === "POST" && pathname === "/api/health/cleanup") {
+        const wsPorts: number[] = [];
+        for (const [id, project] of this.projects) {
+          if (project.status === "inactive") continue;
+          wsPorts.push(project.port + 10000);
+          const agentStore = this.agentStores.get(id);
+          if (agentStore) {
+            let workerPort = project.port + 10100;
+            for (const agent of agentStore.list()) {
+              if (agent.id === "captain") continue;
+              wsPorts.push(workerPort++);
+            }
+          }
+        }
+        const killed = killStaleClaude(wsPorts);
+        this.sseHub.publish("_global", "cleanup_completed", { killed });
+        this.sendJson(res, 200, { ok: true, killed });
+        return;
+      }
+
+      const bridgeActionMatch = pathname.match(/^\/api\/health\/bridges\/([^/]+)\/(restart|stop|start)$/);
+      if (method === "POST" && bridgeActionMatch) {
+        const agentId = bridgeActionMatch[1];
+        const action = bridgeActionMatch[2];
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const project = this.projects.get(projectId);
+        if (!project) { this.sendJson(res, 404, { error: `Unknown project: ${projectId}` }); return; }
+        await this.handleBridgeAction(projectId, project, agentId, action, res);
         return;
       }
 
@@ -823,6 +897,7 @@ export class Gateway {
       // --- Static file serving ---
       this.serveStatic(pathname, res);
     } catch (err) {
+      this.trackError();
       console.error("[gateway] Request error:", err);
       if (!res.headersSent) {
         this.sendJson(res, 500, { error: "Internal server error" });
@@ -929,6 +1004,166 @@ export class Gateway {
       healthy: bridge?.isReady() ?? false,
       port: project.port,
     });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Deep health endpoints                                            */
+  /* ---------------------------------------------------------------- */
+
+  private handleHealthDeep(res: http.ServerResponse): void {
+    const now = Date.now();
+    const mem = process.memoryUsage();
+
+    // Build per-project health
+    const projectsHealth: Record<string, unknown> = {};
+    let anyDegraded = false;
+    let allDown = true;
+
+    for (const [id, project] of this.projects) {
+      // Collect bridge info for this project
+      const bridges: Record<string, unknown> = {};
+      for (const [key, bridge] of this.claudeBridges) {
+        if (key.startsWith(`${id}:`)) {
+          const info = bridge.getHealthInfo();
+          bridges[info.agent_id] = info;
+          if (info.ready) allDown = false;
+          else anyDegraded = true;
+        }
+      }
+
+      // Check store health
+      const stores: Record<string, unknown> = {};
+      const taskStore = this.taskStores.get(id);
+      const agentStore = this.agentStores.get(id);
+      const threadStore = this.threadStores.get(id);
+
+      stores.tasks = this.checkStoreHealth("tasks", id, taskStore);
+      stores.agents = this.checkStoreHealth("agents", id, agentStore);
+      stores.threads = this.checkStoreHealth("threads", id, threadStore);
+
+      // If any store is not ok, mark degraded
+      for (const s of Object.values(stores) as Array<{ ok: boolean }>) {
+        if (!s.ok) anyDegraded = true;
+      }
+
+      projectsHealth[id] = {
+        status: project.status,
+        bridges,
+        stores,
+      };
+
+      // Only active projects with bridges count toward the allDown check
+      if (project.status !== "active" || Object.keys(bridges).length === 0) continue;
+    }
+
+    let status: string;
+    if (allDown && this.claudeBridges.size > 0) status = "unhealthy";
+    else if (anyDegraded) status = "degraded";
+    else status = "healthy";
+
+    this.sendJson(res, 200, {
+      status,
+      uptime_seconds: Math.floor((now - this.gatewayStartedAt) / 1000),
+      started_at: new Date(this.gatewayStartedAt).toISOString(),
+      memory: {
+        rss_mb: Math.round(mem.rss / 1_048_576),
+        heap_used_mb: Math.round(mem.heapUsed / 1_048_576),
+        heap_total_mb: Math.round(mem.heapTotal / 1_048_576),
+      },
+      projects: projectsHealth,
+      sse: {
+        connected_clients: this.sseHub.clientCount(),
+        buffer_size: this.sseHub.bufferSize(),
+      },
+      request_count: this.requestCount,
+      errors_last_hour: this.errorsLastHour(),
+    });
+  }
+
+  private handleHealthBridges(projectId: string, res: http.ServerResponse): void {
+    const bridges: unknown[] = [];
+    for (const [key, bridge] of this.claudeBridges) {
+      if (key.startsWith(`${projectId}:`)) {
+        bridges.push(bridge.getHealthInfo());
+      }
+    }
+    this.sendJson(res, 200, { bridges });
+  }
+
+  private checkStoreHealth(name: string, projectId: string, store: { checkHealth?: () => boolean } | undefined): { ok: boolean; path: string } {
+    const dbPath = `data/${projectId}-${name}.db`;
+    if (!store) return { ok: false, path: dbPath };
+    try {
+      if (typeof store.checkHealth === "function") {
+        return { ok: store.checkHealth(), path: dbPath };
+      }
+      return { ok: true, path: dbPath };
+    } catch {
+      return { ok: false, path: dbPath };
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Recovery action endpoints                                        */
+  /* ---------------------------------------------------------------- */
+
+  private async handleBridgeAction(
+    projectId: string, project: ProjectConfig, agentId: string, action: string, res: http.ServerResponse,
+  ): Promise<void> {
+    const key = this.bridgeKey(projectId, agentId);
+
+    // For start/restart, verify the agent is eligible (not archived/stopped)
+    if (action === "start" || action === "restart") {
+      if (agentId !== "captain") {
+        const agentStore = this.agentStores.get(projectId);
+        const agent = agentStore?.get(agentId);
+        if (!agent) { this.sendJson(res, 404, { error: `Agent ${agentId} not found` }); return; }
+        if (agent.status === "archived" || agent.status === "stopped") {
+          this.sendJson(res, 409, { error: `Agent ${agentId} is ${agent.status} — update agent status first` });
+          return;
+        }
+      }
+    }
+
+    if (action === "stop") {
+      const bridge = this.claudeBridges.get(key);
+      if (!bridge) { this.sendJson(res, 404, { error: `No bridge found for ${agentId}` }); return; }
+      bridge.stop();
+      this.claudeBridges.delete(key);
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "stopped", previousStatus: "ready" });
+      this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "stopped" });
+      return;
+    }
+
+    if (action === "start") {
+      if (this.claudeBridges.has(key)) { this.sendJson(res, 409, { error: `Bridge for ${agentId} is already running` }); return; }
+      try {
+        await this.startAgentBridge(projectId, project, agentId);
+        this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "connecting", previousStatus: "stopped" });
+        this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "starting" });
+      } catch (err) {
+        this.sendJson(res, 500, { error: `Failed to start bridge: ${(err as Error).message}` });
+      }
+      return;
+    }
+
+    if (action === "restart") {
+      const existing = this.claudeBridges.get(key);
+      if (existing) {
+        existing.stop();
+        this.claudeBridges.delete(key);
+      }
+      try {
+        await this.startAgentBridge(projectId, project, agentId);
+        this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "restarting", previousStatus: existing ? "ready" : "stopped" });
+        this.sendJson(res, 200, { ok: true, agent_id: agentId, action: "restarting" });
+      } catch (err) {
+        this.sendJson(res, 500, { error: `Failed to restart bridge: ${(err as Error).message}` });
+      }
+      return;
+    }
+
+    this.sendJson(res, 400, { error: `Unknown action: ${action}` });
   }
 
   /* ---------------------------------------------------------------- */

@@ -75,8 +75,13 @@ export class SseHub {
   }
 
   /** Number of connected clients. */
-  get clientCount(): number {
+  clientCount(): number {
     return this.clients.size;
+  }
+
+  /** Number of events in the replay buffer. */
+  bufferSize(): number {
+    return this.history.length;
   }
 
   private writeEvent(res: http.ServerResponse, event: SseEvent): void {
