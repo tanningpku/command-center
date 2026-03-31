@@ -267,6 +267,11 @@ function selectProject(projectId) {
 // ── Tab Navigation ───────────────────────────────────────────────
 
 function showTab(tabName) {
+  // Stop health polling when leaving health tab
+  if (state.activeTab === 'health' && tabName !== 'health') {
+    stopHealthPoll();
+  }
+
   state.activeTab = tabName;
   localStorage.setItem('cc-activeTab', tabName);
 
@@ -304,6 +309,9 @@ async function loadTabData(tabName) {
       break;
     case 'threads':
       await loadThreadsData();
+      break;
+    case 'health':
+      await loadHealthData();
       break;
   }
 }
@@ -1047,6 +1055,243 @@ function renderBoardCard(issue) {
   `;
 }
 
+// ── Health Tab ──────────────────────────────────────────────────
+
+let _healthPollTimer = null;
+
+function stopHealthPoll() {
+  if (_healthPollTimer) {
+    clearInterval(_healthPollTimer);
+    _healthPollTimer = null;
+  }
+}
+
+function startHealthPoll() {
+  stopHealthPoll();
+  _healthPollTimer = setInterval(() => {
+    if (state.activeTab === 'health') loadHealthData(true);
+  }, 10000);
+}
+
+async function loadHealthData(silent) {
+  const container = document.getElementById('healthContainer');
+  if (!container) return;
+
+  if (!silent) {
+    container.innerHTML = '<div class="cc-loading">Loading health data...</div>';
+  }
+
+  try {
+    const data = await apiCall('/api/health');
+    renderHealth(data);
+    startHealthPoll();
+  } catch (err) {
+    if (!silent) {
+      container.innerHTML = `
+        <div class="cc-health-error">
+          <div class="cc-empty-icon">+</div>
+          <h3>Health Unavailable</h3>
+          <p>Unable to load health data: ${escapeHtml(err.message)}</p>
+          <p style="font-size: 12px; color: var(--cc-text-faint);">The health endpoint may not be deployed yet (T-65).</p>
+        </div>
+      `;
+    }
+  }
+}
+
+function formatUptime(seconds) {
+  if (!seconds && seconds !== 0) return '--';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function healthStatusColor(status) {
+  const colors = {
+    healthy: 'var(--cc-green)',
+    degraded: 'var(--cc-yellow)',
+    unhealthy: 'var(--cc-red)',
+  };
+  return colors[status] || 'var(--cc-text-muted)';
+}
+
+function bridgeStatusColor(status) {
+  const colors = {
+    ready: 'var(--cc-green)',
+    connecting: 'var(--cc-yellow)',
+    restarting: 'var(--cc-yellow)',
+    disconnected: 'var(--cc-red)',
+    stuck: 'var(--cc-red)',
+    stopped: 'var(--cc-text-muted)',
+  };
+  return colors[status] || 'var(--cc-text-muted)';
+}
+
+function renderHealth(data) {
+  const container = document.getElementById('healthContainer');
+  if (!container) return;
+
+  const status = data.status || 'unknown';
+  const statusColor = healthStatusColor(status);
+  const uptime = formatUptime(data.uptime_seconds);
+  const mem = data.memory || {};
+  const sse = data.sse || {};
+  const projects = data.projects || {};
+  const errorsLastHour = data.errors_last_hour ?? '--';
+
+  // System status banner
+  let html = `
+    <div class="cc-health-banner" style="border-left-color: ${statusColor}">
+      <div class="cc-health-banner-row">
+        <div class="cc-health-banner-status">
+          <span class="cc-health-dot" style="background: ${statusColor}"></span>
+          <span class="cc-health-status-label" style="color: ${statusColor}">${escapeHtml(status.toUpperCase())}</span>
+        </div>
+        <span class="cc-health-uptime">Uptime: ${escapeHtml(uptime)}</span>
+      </div>
+      <div class="cc-health-banner-row cc-health-banner-meta">
+        <span>Memory: ${mem.rss_mb ?? '--'}MB RSS / ${mem.heap_used_mb ?? '--'}MB Heap</span>
+        <span>Requests: ${data.requestCount ?? '--'}</span>
+        <span>Errors (1h): ${errorsLastHour}</span>
+      </div>
+    </div>
+  `;
+
+  // Bridges per project
+  for (const [projectId, project] of Object.entries(projects)) {
+    const bridges = project.bridges || {};
+    const bridgeEntries = Object.entries(bridges);
+
+    html += `<div class="cc-health-section-title">Bridges — ${escapeHtml(projectId)}</div>`;
+    html += '<div class="cc-health-bridges">';
+
+    if (bridgeEntries.length === 0) {
+      html += '<div class="cc-health-empty">No bridges found</div>';
+    }
+
+    for (const [agentId, bridge] of bridgeEntries) {
+      const bStatus = bridge.status || 'unknown';
+      const bColor = bridgeStatusColor(bStatus);
+      const bUptime = formatUptime(bridge.uptime_seconds);
+      const lastActivity = bridge.last_activity_at ? timeAgo(bridge.last_activity_at) : '--';
+      const restarts = bridge.restart_count ?? 0;
+      const lastReason = bridge.last_restart_reason;
+      const isReady = bridge.ready || bStatus === 'ready';
+      const isStopped = bStatus === 'stopped' || bStatus === 'disconnected';
+
+      html += `
+        <div class="cc-health-bridge-card">
+          <div class="cc-health-bridge-header">
+            <div class="cc-health-bridge-info">
+              <span class="cc-health-dot" style="background: ${bColor}"></span>
+              <span class="cc-health-bridge-name">${escapeHtml(agentId)}</span>
+              <span class="cc-health-bridge-status" style="color: ${bColor}">${escapeHtml(bStatus.toUpperCase())}</span>
+            </div>
+            <div class="cc-health-bridge-actions">
+              ${isStopped ? `<button class="cc-health-btn cc-health-btn-start" data-action="start" data-agent="${escapeHtml(agentId)}">Start</button>` : ''}
+              <button class="cc-health-btn cc-health-btn-restart" data-action="restart" data-agent="${escapeHtml(agentId)}">Restart</button>
+              ${!isStopped ? `<button class="cc-health-btn cc-health-btn-stop" data-action="stop" data-agent="${escapeHtml(agentId)}">Stop</button>` : ''}
+            </div>
+          </div>
+          <div class="cc-health-bridge-meta">
+            <span>Uptime: ${escapeHtml(bUptime)}</span>
+            <span>Last activity: ${escapeHtml(lastActivity)}</span>
+            <span>Restarts: ${restarts}</span>
+            ${lastReason ? `<span>Last reason: ${escapeHtml(lastReason)}</span>` : ''}
+            ${bridge.pid ? `<span>PID: ${bridge.pid}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    html += '</div>';
+
+    // Stores
+    const stores = project.stores || {};
+    const storeEntries = Object.entries(stores);
+    if (storeEntries.length > 0) {
+      html += '<div class="cc-health-section-title">Stores</div>';
+      html += '<div class="cc-health-stores">';
+      for (const [name, store] of storeEntries) {
+        const storeOk = store.ok;
+        const storeColor = storeOk ? 'var(--cc-green)' : 'var(--cc-red)';
+        const storeLabel = storeOk ? 'OK' : 'ERROR';
+        const sizeKb = store.size_kb != null ? `${store.size_kb}KB` : '';
+        html += `
+          <div class="cc-health-store-card">
+            <span class="cc-health-dot" style="background: ${storeColor}"></span>
+            <span class="cc-health-store-name">${escapeHtml(name)}.db</span>
+            <span class="cc-health-store-status" style="color: ${storeColor}">${storeLabel}</span>
+            ${sizeKb ? `<span class="cc-health-store-size">${sizeKb}</span>` : ''}
+          </div>
+        `;
+      }
+      html += '</div>';
+    }
+  }
+
+  // SSE status
+  html += '<div class="cc-health-section-title">SSE</div>';
+  html += `
+    <div class="cc-health-sse">
+      <span>${sse.connected_clients ?? '--'} clients connected</span>
+      <span>Buffer: ${sse.buffer_size ?? '--'} / ${sse.buffer_capacity ?? '--'}</span>
+    </div>
+  `;
+
+  // Global actions
+  html += `
+    <div class="cc-health-actions">
+      <button class="cc-health-btn cc-health-btn-cleanup" id="healthCleanupBtn">Clean Up Stale Processes</button>
+      <button class="cc-health-btn cc-health-btn-restart-gw" id="healthRestartGwBtn">Restart Gateway</button>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+async function healthBridgeAction(action, agentId) {
+  const actionLabels = { restart: 'Restarting', stop: 'Stopping', start: 'Starting' };
+  const label = actionLabels[action] || action;
+
+  if (!confirm(`${label} bridge "${agentId}"?`)) return;
+
+  try {
+    await apiPost(`/api/health/bridges/${encodeURIComponent(agentId)}/${action}`, {});
+    await loadHealthData(true);
+  } catch (err) {
+    alert(`Failed to ${action} bridge: ${err.message}`);
+  }
+}
+
+async function healthCleanup() {
+  if (!confirm('Clean up stale Claude processes?')) return;
+  try {
+    const result = await apiPost('/api/health/cleanup', {});
+    const killed = result.killed ?? 0;
+    alert(`Cleaned up ${killed} stale process${killed !== 1 ? 'es' : ''}.`);
+    await loadHealthData(true);
+  } catch (err) {
+    alert(`Cleanup failed: ${err.message}`);
+  }
+}
+
+async function healthRestartGateway() {
+  if (!confirm('Restart the entire gateway? The page will reload after restart.')) return;
+  try {
+    await apiPost('/api/restart', {});
+    // Gateway will restart; wait a moment then reload
+    setTimeout(() => window.location.reload(), 3000);
+  } catch (err) {
+    alert(`Restart failed: ${err.message}`);
+  }
+}
+
 // ── Threads Tab ─────────────────────────────────────────────────
 
 async function loadThreadsData() {
@@ -1719,6 +1964,17 @@ function handleSSEEvent(event) {
       }
       break;
 
+    case 'health_changed':
+    case 'bridge_status_changed':
+    case 'bridge_stopped':
+    case 'bridge_started':
+    case 'bridge_restarted':
+    case 'cleanup_completed':
+      if (state.activeTab === 'health') {
+        loadHealthData(true);
+      }
+      break;
+
     default:
       break;
   }
@@ -1890,6 +2146,22 @@ document.getElementById('boardColumns').addEventListener('click', (e) => {
   }
 });
 
+// Health tab — bridge action buttons, cleanup, restart gateway (all delegated)
+document.getElementById('healthContainer').addEventListener('click', (e) => {
+  const btn = e.target.closest('.cc-health-btn');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const agentId = btn.dataset.agent;
+  if (action && agentId) {
+    healthBridgeAction(action, agentId);
+  } else if (btn.id === 'healthCleanupBtn') {
+    healthCleanup();
+  } else if (btn.id === 'healthRestartGwBtn') {
+    healthRestartGateway();
+  }
+});
+document.getElementById('healthRefreshBtn').addEventListener('click', () => loadHealthData());
+
 // Header button handlers
 document.getElementById('settingsBtn').addEventListener('click', () => {
   alert('Settings panel coming soon. Configuration will be available in a future release.');
@@ -1973,6 +2245,7 @@ function showShortcutHelp() {
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>t</kbd><span>Go to Team</span></div>
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>b</kbd><span>Go to Board</span></div>
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>r</kbd><span>Go to Threads</span></div>
+          <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>x</kbd><span>Go to Health</span></div>
         </div>
         <div class="cc-shortcut-group">
           <div class="cc-shortcut-group-title">Lists</div>
@@ -2020,9 +2293,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Ctrl/Cmd + number shortcuts — work even when input is focused
-  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '4') {
+  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '5') {
     e.preventDefault();
-    const tabs = ['home', 'team', 'board', 'threads'];
+    const tabs = ['home', 'team', 'board', 'threads', 'health'];
     const idx = parseInt(key, 10) - 1;
     if (tabs[idx] && state.selectedProjectId) {
       showTab(tabs[idx]);
@@ -2051,7 +2324,7 @@ document.addEventListener('keydown', (e) => {
 
   // g+X chord navigation
   if (_lastKey === 'g' && (now - _lastKeyTime) < CHORD_TIMEOUT && state.selectedProjectId) {
-    const chordMap = { h: 'home', t: 'team', b: 'board', r: 'threads' };
+    const chordMap = { h: 'home', t: 'team', b: 'board', r: 'threads', x: 'health' };
     const tab = chordMap[key];
     if (tab) {
       e.preventDefault();
@@ -2145,7 +2418,7 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
 async function startApp() {
   // Restore tab and thread from localStorage before loading projects
   const savedTab = localStorage.getItem('cc-activeTab');
-  if (savedTab && ['home', 'team', 'board', 'threads'].includes(savedTab)) {
+  if (savedTab && ['home', 'team', 'board', 'threads', 'health'].includes(savedTab)) {
     state.activeTab = savedTab;
   }
   const savedThreadId = localStorage.getItem('cc-activeThreadId');

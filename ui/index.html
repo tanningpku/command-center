@@ -54,6 +54,9 @@
         <button class="cc-nav-tab" data-tab="threads">
           <span class="cc-nav-icon">#</span> Threads
         </button>
+        <button class="cc-nav-tab" data-tab="health">
+          <span class="cc-nav-icon">+</span> Health
+        </button>
       </div>
 
       <div class="cc-sidebar-footer">
@@ -121,6 +124,15 @@
         <div id="boardColumns" class="cc-board">
           <!-- Kanban columns rendered by JS -->
         </div>
+      </div>
+
+      <!-- Health tab -->
+      <div id="tab-health" class="cc-tab-content" style="display: none">
+        <div class="cc-tab-header">
+          <h2>Health</h2>
+          <button id="healthRefreshBtn" class="cc-header-btn" title="Refresh">Refresh</button>
+        </div>
+        <div id="healthContainer" class="cc-health"></div>
       </div>
 
       <!-- Threads tab -->
