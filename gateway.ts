@@ -103,6 +103,24 @@ export class Gateway {
   private readonly authTokens: Set<string> = new Set();
   private readonly authPassword: string | undefined = process.env.CC_PASSWORD;
 
+  /* ---- Health metrics ---- */
+  private readonly gatewayStartedAt = Date.now();
+  private requestCount = 0;
+  private readonly errorTimestamps: number[] = [];
+
+  private trackError(): void {
+    this.errorTimestamps.push(Date.now());
+  }
+
+  private errorsLastHour(): number {
+    const cutoff = Date.now() - 3_600_000;
+    // Prune old entries
+    while (this.errorTimestamps.length > 0 && this.errorTimestamps[0] < cutoff) {
+      this.errorTimestamps.shift();
+    }
+    return this.errorTimestamps.length;
+  }
+
   constructor(opts: GatewayOptions) {
     this.port = opts.port;
     this.uiDir = opts.uiDir;
@@ -293,6 +311,7 @@ export class Gateway {
     // Wire bridge events — agentId captured in closure
     bridge.on("ready", () => {
       this.sseHub.publish(projectId, "claude_ready", { agentId, ready: true });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "ready", previousStatus: "connecting" });
       console.log(`[gateway] Claude ready for ${projectId}/${agentId}`);
     });
 
@@ -316,6 +335,10 @@ export class Gateway {
       });
     });
 
+    bridge.on("restarted", (info: { reason: string }) => {
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId, status: "restarting", previousStatus: "disconnected", reason: info.reason });
+    });
+
     bridge.on("watchdog_kill", (info: { agentId: string; sinceActivityMs: number }) => {
       console.warn(`[gateway] Watchdog killed bridge for ${projectId}/${info.agentId} (no activity for ${Math.round(info.sinceActivityMs / 1000)}s)`);
       this.sseHub.publish(projectId, "bridge_watchdog_kill", {
@@ -323,6 +346,7 @@ export class Gateway {
         sinceActivityMs: info.sinceActivityMs,
         timestamp: new Date().toISOString(),
       });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "stuck", previousStatus: "ready" });
     });
 
     this.claudeBridges.set(compositeKey, bridge);
@@ -610,6 +634,8 @@ export class Gateway {
     const parsed = new URL(rawUrl, `http://localhost:${this.port}`);
     const pathname = parsed.pathname;
 
+    this.requestCount++;
+
     try {
       // --- Auth endpoints (always accessible) ---
       if (method === "POST" && pathname === "/api/login") {
@@ -691,6 +717,18 @@ export class Gateway {
           this.stop();
           process.exit(0);
         }, 500);
+        return;
+      }
+
+      // --- Health endpoints ---
+      if (method === "GET" && pathname === "/api/health") {
+        this.handleHealthDeep(res);
+        return;
+      }
+      if (method === "GET" && pathname === "/api/health/bridges") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        this.handleHealthBridges(projectId, res);
         return;
       }
 
@@ -823,6 +861,7 @@ export class Gateway {
       // --- Static file serving ---
       this.serveStatic(pathname, res);
     } catch (err) {
+      this.trackError();
       console.error("[gateway] Request error:", err);
       if (!res.headersSent) {
         this.sendJson(res, 500, { error: "Internal server error" });
@@ -929,6 +968,103 @@ export class Gateway {
       healthy: bridge?.isReady() ?? false,
       port: project.port,
     });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Deep health endpoints                                            */
+  /* ---------------------------------------------------------------- */
+
+  private handleHealthDeep(res: http.ServerResponse): void {
+    const now = Date.now();
+    const mem = process.memoryUsage();
+
+    // Build per-project health
+    const projectsHealth: Record<string, unknown> = {};
+    let anyDegraded = false;
+    let allDown = true;
+
+    for (const [id, project] of this.projects) {
+      // Collect bridge info for this project
+      const bridges: Record<string, unknown> = {};
+      for (const [key, bridge] of this.claudeBridges) {
+        if (key.startsWith(`${id}:`)) {
+          const info = bridge.getHealthInfo();
+          bridges[info.agent_id] = info;
+          if (info.ready) allDown = false;
+          else anyDegraded = true;
+        }
+      }
+
+      // Check store health
+      const stores: Record<string, unknown> = {};
+      const taskStore = this.taskStores.get(id);
+      const agentStore = this.agentStores.get(id);
+      const threadStore = this.threadStores.get(id);
+
+      stores.tasks = this.checkStoreHealth("tasks", id, taskStore);
+      stores.agents = this.checkStoreHealth("agents", id, agentStore);
+      stores.threads = this.checkStoreHealth("threads", id, threadStore);
+
+      // If any store is not ok, mark degraded
+      for (const s of Object.values(stores) as Array<{ ok: boolean }>) {
+        if (!s.ok) anyDegraded = true;
+      }
+
+      projectsHealth[id] = {
+        status: project.status,
+        bridges,
+        stores,
+      };
+
+      // If project has no bridges at all, don't count as "all down"
+      if (Object.keys(bridges).length === 0) allDown = false;
+    }
+
+    let status: string;
+    if (allDown && this.claudeBridges.size > 0) status = "unhealthy";
+    else if (anyDegraded) status = "degraded";
+    else status = "healthy";
+
+    this.sendJson(res, 200, {
+      status,
+      uptime_seconds: Math.floor((now - this.gatewayStartedAt) / 1000),
+      started_at: new Date(this.gatewayStartedAt).toISOString(),
+      memory: {
+        rss_mb: Math.round(mem.rss / 1_048_576),
+        heap_used_mb: Math.round(mem.heapUsed / 1_048_576),
+        heap_total_mb: Math.round(mem.heapTotal / 1_048_576),
+      },
+      projects: projectsHealth,
+      sse: {
+        connected_clients: this.sseHub.clientCount(),
+        buffer_size: this.sseHub.bufferSize(),
+      },
+      request_count: this.requestCount,
+      errors_last_hour: this.errorsLastHour(),
+    });
+  }
+
+  private handleHealthBridges(projectId: string, res: http.ServerResponse): void {
+    const bridges: unknown[] = [];
+    for (const [key, bridge] of this.claudeBridges) {
+      if (key.startsWith(`${projectId}:`)) {
+        bridges.push(bridge.getHealthInfo());
+      }
+    }
+    this.sendJson(res, 200, { bridges });
+  }
+
+  private checkStoreHealth(name: string, projectId: string, store: { checkHealth?: () => boolean } | undefined): { ok: boolean; path: string } {
+    const dbPath = `data/${projectId}-${name}.db`;
+    if (!store) return { ok: false, path: dbPath };
+    try {
+      if (typeof store.checkHealth === "function") {
+        return { ok: store.checkHealth(), path: dbPath };
+      }
+      return { ok: true, path: dbPath };
+    } catch {
+      return { ok: false, path: dbPath };
+    }
   }
 
   /* ---------------------------------------------------------------- */
