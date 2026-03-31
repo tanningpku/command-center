@@ -55,16 +55,16 @@ struct ThreadListView: View {
                     List {
                         // Active threads
                         ForEach(activeThreads) { thread in
-                            ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
-                                .contentShape(Rectangle())
-                                .onTapGesture { navigationPath.append(thread) }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        threadToDelete = thread
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
+                            NavigationLink(value: thread) {
+                                ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    threadToDelete = thread
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
+                            }
                         }
 
                         // Completed section
@@ -72,17 +72,17 @@ struct ThreadListView: View {
                             Section {
                                 if showCompleted {
                                     ForEach(completedThreads) { thread in
-                                        ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
-                                            .contentShape(Rectangle())
-                                            .onTapGesture { navigationPath.append(thread) }
-                                            .opacity(0.6)
-                                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                                Button(role: .destructive) {
-                                                    threadToDelete = thread
-                                                } label: {
-                                                    Label("Delete", systemImage: "trash")
-                                                }
+                                        NavigationLink(value: thread) {
+                                            ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
+                                        }
+                                        .opacity(0.6)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button(role: .destructive) {
+                                                threadToDelete = thread
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
                                             }
+                                        }
                                     }
                                 }
                             } header: {
