@@ -683,6 +683,17 @@ export class Gateway {
         return;
       }
 
+      // --- Restart endpoint ---
+      if (method === "POST" && pathname === "/api/restart") {
+        console.log("[gateway] Restart requested via API");
+        this.sendJson(res, 200, { ok: true, message: "Restarting gateway..." });
+        setTimeout(() => {
+          this.stop();
+          process.exit(0);
+        }, 500);
+        return;
+      }
+
       // --- Assistants endpoint (alias for agents) ---
       if (method === "GET" && pathname === "/api/assistants") {
         const projectId = this.resolveProjectId(req, parsed);
