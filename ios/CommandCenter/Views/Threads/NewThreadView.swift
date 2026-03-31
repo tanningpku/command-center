@@ -65,13 +65,19 @@ struct NewThreadView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isCreating)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { createThread() }
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isCreating)
-                        .bold()
+                    if isCreating {
+                        ProgressView()
+                    } else {
+                        Button("Create") { createThread() }
+                            .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .bold()
+                    }
                 }
             }
+            .interactiveDismissDisabled(isCreating)
             .task {
                 if teamStore.agents.isEmpty {
                     await teamStore.loadAgents()
@@ -82,7 +88,7 @@ struct NewThreadView: View {
 
     private func createThread() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmedTitle.isEmpty else { return }
+        guard !trimmedTitle.isEmpty, !isCreating else { return }
 
         isCreating = true
         error = nil
@@ -90,13 +96,22 @@ struct NewThreadView: View {
         let participants = selectedAgentIds.map { ["id": $0] }
 
         Task {
-            defer { isCreating = false }
             do {
                 let newThread = try await threadStore.createThread(title: trimmedTitle, participants: participants)
                 HapticManager.success()
                 dismiss()
                 onCreated(newThread)
+            } catch let apiError as APIError {
+                isCreating = false
+                switch apiError {
+                case .badResponse(statusCode: 409):
+                    self.error = "A thread with this title already exists."
+                default:
+                    self.error = "Failed to create thread: \(apiError.localizedDescription)"
+                }
+                HapticManager.error()
             } catch {
+                isCreating = false
                 self.error = "Failed to create thread: \(error.localizedDescription)"
                 HapticManager.error()
             }

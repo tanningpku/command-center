@@ -125,13 +125,30 @@ export class ThreadStore {
   createThread(opts: { id?: string; title: string; participants?: ParticipantInput[] }): Thread {
     const id = opts.id ?? randomUUID();
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO threads (id, title, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)`).run(id, opts.title, now, now);
-    if (opts.participants) {
-      for (const p of opts.participants) {
-        this.db.prepare(
-          `INSERT OR IGNORE INTO thread_participants (thread_id, participant_type, participant_id, role, created_at) VALUES (?, ?, ?, ?, ?)`,
-        ).run(id, p.participantType, p.participantId, p.role ?? "participant", now);
+
+    // Reject duplicate active thread titles
+    const existing = this.db.prepare(
+      `SELECT id FROM threads WHERE title = ? AND status = 'active'`
+    ).get(opts.title) as any;
+    if (existing) {
+      throw new Error(`A thread with duplicate title "${opts.title}" already exists`);
+    }
+
+    // Wrap in transaction so thread + participants are atomic
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare(`INSERT INTO threads (id, title, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)`).run(id, opts.title, now, now);
+      if (opts.participants) {
+        for (const p of opts.participants) {
+          this.db.prepare(
+            `INSERT OR IGNORE INTO thread_participants (thread_id, participant_type, participant_id, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+          ).run(id, p.participantType, p.participantId, p.role ?? "participant", now);
+        }
       }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
     }
     return this.getThread(id)!;
   }
