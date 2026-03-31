@@ -52,15 +52,40 @@ struct ThreadListView: View {
                     ContentUnavailableView("No Threads", systemImage: "bubble.left.and.bubble.right",
                         description: Text("Threads will appear here when agents start working."))
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            // Active threads
-                            ForEach(activeThreads) { thread in
-                                threadRow(thread)
-                            }
+                    List {
+                        // Active threads
+                        ForEach(activeThreads) { thread in
+                            ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
+                                .contentShape(Rectangle())
+                                .onTapGesture { navigationPath.append(thread) }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        threadToDelete = thread
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                        }
 
-                            // Completed section
-                            if !completedThreads.isEmpty {
+                        // Completed section
+                        if !completedThreads.isEmpty {
+                            Section {
+                                if showCompleted {
+                                    ForEach(completedThreads) { thread in
+                                        ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { navigationPath.append(thread) }
+                                            .opacity(0.6)
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                                Button(role: .destructive) {
+                                                    threadToDelete = thread
+                                                } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                            }
+                                    }
+                                }
+                            } header: {
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         showCompleted.toggle()
@@ -71,22 +96,12 @@ struct ThreadListView: View {
                                             .font(.caption2.weight(.semibold))
                                         Text("Completed (\(completedThreads.count))")
                                             .font(.subheadline.weight(.medium))
-                                        Spacer()
-                                    }
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                }
-
-                                if showCompleted {
-                                    ForEach(completedThreads) { thread in
-                                        threadRow(thread)
-                                            .opacity(0.6)
                                     }
                                 }
                             }
                         }
                     }
+                    .listStyle(.plain)
                     .refreshable {
                         HapticManager.light()
                         await threadStore.loadThreads()
@@ -170,24 +185,6 @@ struct ThreadListView: View {
         }
     }
 
-    private func threadRow(_ thread: CCThread) -> some View {
-        ThreadRowView(thread: thread, preview: threadStore.threadPreviews[thread.id])
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture { navigationPath.append(thread) }
-            .contextMenu {
-                Button(role: .destructive) {
-                    threadToDelete = thread
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .overlay(alignment: .bottom) {
-                Divider().padding(.leading, 16)
-            }
-    }
 }
 
 /// Single thread row in the list with optional last-message preview.
