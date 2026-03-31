@@ -52,19 +52,32 @@ function getProcessCmdline(pid: number): string {
 }
 
 /**
- * Attempt to free a port held by a stale process. On EADDRINUSE the listener
- * is typically an old gateway (node) process, not a claude child. This function:
- * 1. Finds the PID holding the port
- * 2. Sends SIGTERM (graceful) then SIGKILL if needed
- * 3. Only kills if the PID is NOT our own process
- * Returns true if a process was killed.
+ * Check if a process command line looks like a stale gateway or claude process.
+ */
+function isOwnedProcess(cmdline: string): boolean {
+  // Claude CLI bridge child
+  if (cmdline.includes("claude") && cmdline.includes("--sdk-url")) return true;
+  // Node gateway process (our own binary or tsx/node running gateway/index)
+  if ((cmdline.includes("node") || cmdline.includes("tsx")) &&
+      (cmdline.includes("gateway") || cmdline.includes("index") || cmdline.includes("command-center"))) return true;
+  return false;
+}
+
+/**
+ * Attempt to free a port held by a stale gateway or claude process.
+ * Only sends SIGTERM to processes confirmed as owned (gateway node process
+ * or claude CLI). Returns true if a process was signaled.
  */
 export function freePort(port: number): boolean {
   const pids = findPidsOnPort(port);
   for (const pid of pids) {
     if (pid === process.pid) continue;
     const cmd = getProcessCmdline(pid);
-    console.warn(`[bridge-cleanup] Port ${port} held by PID ${pid}: ${cmd || "(unknown)"}`);
+    if (!cmd || !isOwnedProcess(cmd)) {
+      console.warn(`[bridge-cleanup] Port ${port} held by unknown PID ${pid}: ${cmd || "(unknown)"} — not killing`);
+      continue;
+    }
+    console.warn(`[bridge-cleanup] Port ${port} held by stale PID ${pid}: ${cmd}`);
     try {
       process.kill(pid, "SIGTERM");
       console.log(`[bridge-cleanup] Sent SIGTERM to PID ${pid} on port ${port}`);
