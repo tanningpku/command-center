@@ -224,6 +224,8 @@ export class ClaudeBridge extends EventEmitter {
   static readonly STUCK_TIMEOUT_MS = 300_000;
   /** How often the watchdog checks for stuck bridges (default: 30s) */
   private static readonly WATCHDOG_INTERVAL_MS = 30_000;
+  /** Idle timeout in ms — bridge not ready AND no activity triggers restart (default: 10min) */
+  static readonly IDLE_TIMEOUT_MS = 600_000;
 
   /** The thread that the most recent user message was sent in. */
   activeThreadId = "main";
@@ -235,6 +237,19 @@ export class ClaudeBridge extends EventEmitter {
   private _messagesReceived = 0;
   private _messagesSent = 0;
   private _errors = 0;
+
+  /* ---- Restart escalation ---- */
+  /** Timestamps of recent restarts for escalation tracking */
+  private restartTimestamps: number[] = [];
+  /** Max restarts within the escalation window before stopping the bridge */
+  static readonly ESCALATION_MAX_RESTARTS = 5;
+  /** Window in ms for restart escalation (default: 10min) */
+  static readonly ESCALATION_WINDOW_MS = 600_000;
+  /** Whether the bridge was stopped by escalation (not a normal stop) */
+  private _escalationStopped = false;
+
+  /** True if the bridge was stopped due to restart escalation. */
+  get escalationStopped(): boolean { return this._escalationStopped; }
 
   /** Return health diagnostics for this bridge. */
   getHealthInfo(): {
@@ -428,6 +443,27 @@ export class ClaudeBridge extends EventEmitter {
 
   private scheduleAutoRestart(reason: string): void {
     if (this.autoRestartPending) return;
+
+    // Restart escalation: if too many restarts in the window, stop instead
+    const now = Date.now();
+    this.restartTimestamps.push(now);
+    const cutoff = now - ClaudeBridge.ESCALATION_WINDOW_MS;
+    this.restartTimestamps = this.restartTimestamps.filter((t) => t >= cutoff);
+    if (this.restartTimestamps.length >= ClaudeBridge.ESCALATION_MAX_RESTARTS) {
+      console.error(
+        `[${this.tag}] ESCALATION: ${this.restartTimestamps.length} restarts in ${ClaudeBridge.ESCALATION_WINDOW_MS / 1000}s — stopping bridge`,
+      );
+      this._escalationStopped = true;
+      this.emit("escalation_stop", {
+        agentId: this.opts.agentId ?? "captain",
+        restartCount: this.restartTimestamps.length,
+        windowMs: ClaudeBridge.ESCALATION_WINDOW_MS,
+        lastReason: reason,
+      });
+      this.stop();
+      return;
+    }
+
     this.autoRestartPending = true;
     const delay = this.backoffMs;
     this.backoffMs = Math.min(this.backoffMs * 2, ClaudeBridge.MAX_BACKOFF_MS);
@@ -606,13 +642,28 @@ export class ClaudeBridge extends EventEmitter {
 
   private checkStuck(): void {
     if (this.stopped || this.autoRestartPending) return;
-    // Only check if we've actually sent a message (agent is expected to be working)
-    if (this.lastUserMessageAt === 0) return;
-    // Only relevant if child process is alive (exit handler covers crashes)
-    if (!this.child) return;
 
     const now = Date.now();
     const sinceActivity = now - this.lastActivityAt;
+
+    // Idle detection: bridge not ready AND no activity for IDLE_TIMEOUT_MS
+    // This catches bridges that disconnected silently and never reconnected.
+    if (!this.isReady() && this.child && sinceActivity >= ClaudeBridge.IDLE_TIMEOUT_MS) {
+      console.warn(
+        `[${this.tag}] WATCHDOG: Bridge idle — not ready and no activity for ` +
+        `${Math.round(sinceActivity / 1000)}s. Auto-restarting.`,
+      );
+      this.emit("idle_restart", {
+        agentId: this.opts.agentId ?? "captain",
+        sinceActivityMs: sinceActivity,
+      });
+      this.scheduleAutoRestart("idle_not_ready");
+      return;
+    }
+
+    // Stuck detection: only if we've sent a message and are waiting for a response
+    if (this.lastUserMessageAt === 0) return;
+    if (!this.child) return;
 
     // Not stuck if there's been recent activity (SDK messages, stdout, stderr)
     if (sinceActivity < ClaudeBridge.STUCK_TIMEOUT_MS) return;
