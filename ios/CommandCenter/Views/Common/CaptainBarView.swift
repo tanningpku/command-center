@@ -5,12 +5,12 @@ import SwiftUI
 struct CaptainBarView: View {
     @Environment(ThreadStore.self) var threadStore
 
-    @State private var isVisible = false
+    @State private var displayedThought: CaptainThought?
     @State private var hideTask: Task<Void, Never>?
 
     var body: some View {
         Group {
-            if let thought = threadStore.captainThought, isVisible {
+            if let thought = displayedThought {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(.blue.opacity(0.7))
@@ -32,24 +32,26 @@ struct CaptainBarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 12)
-                .padding(.bottom, 2)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: displayedThought != nil)
         .onChange(of: threadStore.captainThought) { _, newValue in
-            guard newValue != nil else { return }
-            scheduleHide()
+            guard let thought = newValue else { return }
+            showThought(thought)
         }
     }
 
-    private func scheduleHide() {
+    private func showThought(_ thought: CaptainThought) {
+        displayedThought = thought
         hideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.25)) { isVisible = true }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                withAnimation(.easeOut(duration: 0.8)) { isVisible = false }
+                withAnimation(.easeOut(duration: 0.8)) {
+                    displayedThought = nil
+                }
             }
         }
     }

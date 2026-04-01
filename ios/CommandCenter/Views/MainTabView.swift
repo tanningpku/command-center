@@ -29,8 +29,9 @@ struct MainTabView: View {
                 .tag(NavigationRouter.Tab.health)
                 .tabItem { Label("Health", systemImage: "heart.text.square") }
         }
-        .safeAreaInset(edge: .bottom) {
+        .overlay(alignment: .bottom) {
             CaptainBarView()
+                .padding(.bottom, 50) // clear the tab bar
         }
         .onChange(of: router.selectedTab) { _, _ in
             HapticManager.selection()
