@@ -1883,12 +1883,15 @@ function connectSSE() {
     state.eventSource = null;
   }
 
-  if (!state.selectedProjectId) return;
-
   try {
-    let url = `/api/events?projectId=${encodeURIComponent(state.selectedProjectId)}`;
+    let url = '/api/events';
+    if (state.selectedProjectId) {
+      url += `?projectId=${encodeURIComponent(state.selectedProjectId)}`;
+    }
     const sseToken = getAuthToken();
-    if (sseToken) url += `&token=${encodeURIComponent(sseToken)}`;
+    if (sseToken) {
+      url += (url.includes('?') ? '&' : '?') + `token=${encodeURIComponent(sseToken)}`;
+    }
     state.eventSource = new EventSource(url);
 
     state.eventSource.onmessage = (event) => {
@@ -2199,11 +2202,6 @@ function handleProjectDeleted(projectId) {
     state.selectedProjectId = null;
     localStorage.removeItem('cc-selectedProjectId');
 
-    if (state.eventSource) {
-      state.eventSource.close();
-      state.eventSource = null;
-    }
-
     stopHealthPoll();
 
     if (state.projects.length > 0) {
@@ -2217,6 +2215,8 @@ function handleProjectDeleted(projectId) {
       document.querySelectorAll('.cc-tab-content').forEach(el => {
         el.style.display = 'none';
       });
+      // Reconnect SSE in global scope to receive project_created events
+      connectSSE();
     }
   } else {
     renderProjectList();
