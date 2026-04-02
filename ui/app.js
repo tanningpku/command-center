@@ -2123,11 +2123,14 @@ document.getElementById('newProjectForm').addEventListener('submit', async (e) =
 
 // ── Delete Project ──────────────────────────────────────────────
 
+let _deleteTargetProjectId = null;
+
 function openDeleteProjectModal() {
   if (!state.selectedProjectId) return;
   const project = state.projects.find(p => p.id === state.selectedProjectId);
   if (!project) return;
 
+  _deleteTargetProjectId = project.id;
   const modal = document.getElementById('deleteProjectModal');
   const errorEl = document.getElementById('deleteProjectError');
   errorEl.style.display = 'none';
@@ -2137,6 +2140,7 @@ function openDeleteProjectModal() {
 
 function closeDeleteProjectModal() {
   document.getElementById('deleteProjectModal').style.display = 'none';
+  _deleteTargetProjectId = null;
 }
 
 document.getElementById('deleteProjectBtn').addEventListener('click', openDeleteProjectModal);
@@ -2149,7 +2153,7 @@ document.getElementById('deleteProjectModal').addEventListener('click', (e) => {
 });
 
 document.getElementById('deleteProjectConfirmBtn').addEventListener('click', async () => {
-  const projectId = state.selectedProjectId;
+  const projectId = _deleteTargetProjectId;
   if (!projectId) return;
 
   const errorEl = document.getElementById('deleteProjectError');
@@ -2186,6 +2190,9 @@ document.getElementById('deleteProjectConfirmBtn').addEventListener('click', asy
 });
 
 function handleProjectDeleted(projectId) {
+  // Close delete modal if it's targeting this project (e.g. deleted by another client)
+  if (_deleteTargetProjectId === projectId) closeDeleteProjectModal();
+
   state.projects = state.projects.filter(p => p.id !== projectId);
 
   if (state.selectedProjectId === projectId) {
