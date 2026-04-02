@@ -120,8 +120,9 @@ export class TaskStore {
     }
     if (opts?.labels?.length) {
       for (const label of opts.labels) {
+        // Match the exact JSON-encoded label string (e.g. "bug" not "debug")
         conds.push("labels LIKE ?");
-        params.push(`%${JSON.stringify(label).slice(1, -1)}%`);
+        params.push(`%${JSON.stringify(label)}%`);
       }
     }
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";

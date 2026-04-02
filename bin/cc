@@ -19,6 +19,9 @@ json_patch() {
 json_delete() {
   curl -s -X DELETE "$BASE_URL$1" -H "X-Project-Id: $PROJECT" -H "X-Agent-Id: $AGENT"
 }
+urlencode() {
+  python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
+}
 
 case "${1:-help}" in
 
@@ -58,8 +61,8 @@ case "${1:-help}" in
             --state) QUERY="${QUERY}&state=$2"; shift 2;;
             --assignee) QUERY="${QUERY}&assignee=$2"; shift 2;;
             --priority) QUERY="${QUERY}&priority=$2"; shift 2;;
-            --search) QUERY="${QUERY}&search=$2"; shift 2;;
-            --labels) QUERY="${QUERY}&labels=$2"; shift 2;;
+            --search) QUERY="${QUERY}&search=$(urlencode "$2")"; shift 2;;
+            --labels) QUERY="${QUERY}&labels=$(urlencode "$2")"; shift 2;;
             *) shift;;
           esac
         done
