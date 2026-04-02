@@ -549,7 +549,13 @@ export class Gateway {
       if (p.participantId === msg.sender.id) continue;
 
       const bridge = await this.ensureBridge(msg.projectId, p.participantId);
-      if (!bridge?.isReady()) continue;
+      if (!bridge?.isReady()) {
+        console.warn(
+          `[gateway] Message dropped: bridge not ready for ${msg.projectId}/${p.participantId} ` +
+          `(thread: ${msg.threadId}, sender: ${msg.sender.id}, kind: ${msg.kind ?? "message"}, source: ${msg.source ?? "unknown"})`,
+        );
+        continue;
+      }
 
       bridge.sendUserMessage(formatted, msg.threadId, msg.sender.id);
     }
@@ -562,12 +568,44 @@ export class Gateway {
 
   /** Get or on-demand spawn a bridge for an agent. Returns undefined for archived/stopped agents. */
   private async ensureBridge(projectId: string, agentId: string): Promise<ClaudeBridge | undefined> {
-    const existing = this.resolveBridge(projectId, agentId);
-    if (existing) return existing;
+    const key = this.bridgeKey(projectId, agentId);
 
     // Don't respawn bridges stopped by escalation — requires manual restart
-    const key = this.bridgeKey(projectId, agentId);
     if (this.escalationStoppedBridges.has(key)) return undefined;
+
+    const existing = this.resolveBridge(projectId, agentId);
+    if (existing) {
+      if (existing.isReady()) return existing;
+
+      // Bridge exists but not ready — check its status to decide recovery strategy
+      const health = existing.getHealthInfo();
+
+      if (health.status === "stopped") {
+        // Explicitly stopped — can't wake it up
+        return undefined;
+      }
+
+      if (health.status === "disconnected") {
+        // No child process, no restart pending — stale bridge. Remove and respawn below.
+        console.log(`[gateway] Bridge ${projectId}/${agentId} is disconnected — removing stale bridge for respawn`);
+        try { existing.stop(); } catch { /* already stopped */ }
+        this.claudeBridges.delete(key);
+        // Fall through to spawn a new bridge
+      } else {
+        // "restarting" or "connecting" — wait for it to become ready (up to 30s)
+        console.log(`[gateway] Bridge ${projectId}/${agentId} not ready (status: ${health.status}) — waiting up to 30s`);
+        const recovered = await new Promise<boolean>((resolve) => {
+          const timeout = setTimeout(() => resolve(false), 30_000);
+          existing.once("ready", () => { clearTimeout(timeout); resolve(true); });
+        });
+        if (recovered) {
+          console.log(`[gateway] Bridge ${projectId}/${agentId} recovered and ready`);
+        } else {
+          console.warn(`[gateway] Bridge ${projectId}/${agentId} did not recover within 30s`);
+        }
+        return existing;
+      }
+    }
 
     const agentStore = this.agentStores.get(projectId);
     if (agentId !== "captain") {
