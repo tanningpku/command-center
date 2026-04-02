@@ -766,6 +766,21 @@ body {
   font-size: 12px;
 }
 
+/* ── Board Drag-and-Drop ──────────────────────────────────────── */
+
+.cc-board-card-dragging {
+  opacity: 0.4;
+}
+
+.cc-board-column-dragover {
+  background: color-mix(in srgb, var(--cc-accent) 8%, var(--cc-surface));
+  border-color: var(--cc-accent);
+}
+
+.cc-board-column-dragover .cc-board-card-list {
+  min-height: 60px;
+}
+
 /* ── Ops Grid ──────────────────────────────────────────────────── */
 .cc-ops-grid {
   display: grid;
