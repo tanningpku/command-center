@@ -721,6 +721,11 @@ export class Gateway {
         await this.handleCreateProject(req, res);
         return;
       }
+      const projectDeleteMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+      if (method === "DELETE" && projectDeleteMatch) {
+        this.handleDeleteProject(projectDeleteMatch[1], res);
+        return;
+      }
 
       const healthMatch = pathname.match(/^\/api\/registry\/([^/]+)\/health$/);
       if (method === "GET" && healthMatch) {
@@ -730,8 +735,7 @@ export class Gateway {
 
       // --- SSE events (native) ---
       if (method === "GET" && pathname === "/api/events") {
-        const projectId = this.resolveProjectId(req, parsed);
-        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const projectId = this.resolveProjectId(req, parsed) || "_global";
         this.sseHub.addClient(res, projectId);
         return;
       }
@@ -1036,7 +1040,45 @@ export class Gateway {
     // Start Claude bridge for the new project
     await this.startAgentBridge(id, config, "captain");
 
+    this.sseHub.publishGlobal("project_created", { projectId: config.id, project: config });
+
     this.sendJson(res, 201, { project: config });
+  }
+
+  private handleDeleteProject(projectId: string, res: http.ServerResponse): void {
+    const config = this.projects.get(projectId);
+    if (!config) {
+      this.sendJson(res, 404, { error: `Project '${projectId}' not found` });
+      return;
+    }
+
+    // Stop all bridges for this project
+    for (const [key, bridge] of this.claudeBridges) {
+      if (key.startsWith(projectId + ":")) {
+        bridge.stop();
+        this.claudeBridges.delete(key);
+      }
+    }
+
+    // Remove stores
+    this.taskStores.delete(projectId);
+    this.agentStores.delete(projectId);
+    this.threadStores.delete(projectId);
+    for (const [key] of this.kbManagers) {
+      if (key.startsWith(projectId + ":")) this.kbManagers.delete(key);
+    }
+    this.githubPlugins.delete(projectId);
+
+    // Remove YAML config file
+    const yamlPath = path.join(this.configDir, `${projectId}.yaml`);
+    if (fs.existsSync(yamlPath)) fs.unlinkSync(yamlPath);
+
+    this.projects.delete(projectId);
+    console.log(`[gateway] Deleted project '${projectId}'`);
+
+    this.sseHub.publishGlobal("project_deleted", { projectId });
+
+    this.sendJson(res, 200, { deleted: projectId });
   }
 
   /** Post a health-related system message to the project's main thread. */
