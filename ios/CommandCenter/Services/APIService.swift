@@ -92,6 +92,14 @@ actor APIService {
         return resp.project
     }
 
+    func deleteProject(id: String) async throws {
+        let req = request("api/projects/\(id)", method: "DELETE")
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+    }
+
     // MARK: - Threads
 
     func fetchThreads() async throws -> ThreadListResponse {
