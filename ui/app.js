@@ -867,8 +867,12 @@ function populateBoardAssigneeFilter() {
   }
 }
 
+let _boardLoadSeq = 0;
+
 async function loadBoardData() {
   if (!state.selectedProjectId) return;
+
+  const seq = ++_boardLoadSeq;
 
   // Ensure assignee filter is populated
   if (!state.teamData || state.teamData.length === 0) {
@@ -893,6 +897,7 @@ async function loadBoardData() {
 
     // Try tasks first — if tasks exist, render task-based board
     const taskData = await apiCall('/api/tasks' + (qs ? '?' + qs : ''));
+    if (seq !== _boardLoadSeq) return; // stale response — newer request in flight
     const tasks = taskData.tasks || [];
 
     if (tasks.length > 0) {
