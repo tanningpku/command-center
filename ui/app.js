@@ -1883,12 +1883,15 @@ function connectSSE() {
     state.eventSource = null;
   }
 
-  if (!state.selectedProjectId) return;
-
   try {
-    let url = `/api/events?projectId=${encodeURIComponent(state.selectedProjectId)}`;
+    let url = '/api/events';
+    if (state.selectedProjectId) {
+      url += `?projectId=${encodeURIComponent(state.selectedProjectId)}`;
+    }
     const sseToken = getAuthToken();
-    if (sseToken) url += `&token=${encodeURIComponent(sseToken)}`;
+    if (sseToken) {
+      url += (url.includes('?') ? '&' : '?') + `token=${encodeURIComponent(sseToken)}`;
+    }
     state.eventSource = new EventSource(url);
 
     state.eventSource.onmessage = (event) => {
@@ -2031,6 +2034,17 @@ function handleSSEEvent(event) {
       }
       break;
 
+    case 'project_deleted': {
+      const deletedId = event.payload?.projectId;
+      if (deletedId) handleProjectDeleted(deletedId);
+      break;
+    }
+
+    case 'project_created':
+      // Reload project list to pick up the new project
+      loadProjects();
+      break;
+
     default:
       break;
   }
@@ -2109,6 +2123,107 @@ document.getElementById('newProjectForm').addEventListener('submit', async (e) =
     submitBtn.textContent = 'Create Project';
   }
 });
+
+// ── Delete Project ──────────────────────────────────────────────
+
+let _deleteTargetProjectId = null;
+
+function openDeleteProjectModal() {
+  if (!state.selectedProjectId) return;
+  const project = state.projects.find(p => p.id === state.selectedProjectId);
+  if (!project) return;
+
+  _deleteTargetProjectId = project.id;
+  const modal = document.getElementById('deleteProjectModal');
+  const errorEl = document.getElementById('deleteProjectError');
+  errorEl.style.display = 'none';
+  document.getElementById('deleteProjectName').textContent = project.name || project.id;
+  modal.style.display = 'flex';
+}
+
+function closeDeleteProjectModal() {
+  document.getElementById('deleteProjectModal').style.display = 'none';
+  _deleteTargetProjectId = null;
+}
+
+document.getElementById('deleteProjectBtn').addEventListener('click', openDeleteProjectModal);
+document.getElementById('deleteProjectCloseBtn').addEventListener('click', closeDeleteProjectModal);
+document.getElementById('deleteProjectCancelBtn').addEventListener('click', closeDeleteProjectModal);
+
+// Close on overlay click
+document.getElementById('deleteProjectModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeDeleteProjectModal();
+});
+
+document.getElementById('deleteProjectConfirmBtn').addEventListener('click', async () => {
+  const projectId = _deleteTargetProjectId;
+  if (!projectId) return;
+
+  const errorEl = document.getElementById('deleteProjectError');
+  const confirmBtn = document.getElementById('deleteProjectConfirmBtn');
+
+  errorEl.style.display = 'none';
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Deleting...';
+
+  try {
+    const headers = {};
+    const tok = getAuthToken();
+    if (tok) headers['Authorization'] = `Bearer ${tok}`;
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (res.status === 401) { handle401(); return; }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    // Success — close modal, remove project from list
+    closeDeleteProjectModal();
+    handleProjectDeleted(projectId);
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = 'block';
+  } finally {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Delete Project';
+  }
+});
+
+function handleProjectDeleted(projectId) {
+  // Close delete modal if it's targeting this project (e.g. deleted by another client)
+  if (_deleteTargetProjectId === projectId) closeDeleteProjectModal();
+
+  state.projects = state.projects.filter(p => p.id !== projectId);
+
+  if (state.selectedProjectId === projectId) {
+    state.selectedProjectId = null;
+    localStorage.removeItem('cc-selectedProjectId');
+    state.activeThreadId = null;
+    localStorage.removeItem('cc-activeThreadId');
+
+    stopHealthPoll();
+
+    if (state.projects.length > 0) {
+      renderProjectList();
+      selectProject(state.projects[0].id);
+    } else {
+      renderProjectList();
+      dom.tabNav.style.display = 'none';
+      dom.emptyState.style.display = 'flex';
+      // Hide all tab content
+      document.querySelectorAll('.cc-tab-content').forEach(el => {
+        el.style.display = 'none';
+      });
+      // Reconnect SSE in global scope to receive project_created events
+      connectSSE();
+    }
+  } else {
+    renderProjectList();
+  }
+}
 
 // ── Event Listeners ──────────────────────────────────────────────
 
@@ -2352,6 +2467,7 @@ document.addEventListener('keydown', (e) => {
     } else {
       closeNewProjectModal();
       closeNewThreadModal();
+      closeDeleteProjectModal();
     }
     return;
   }

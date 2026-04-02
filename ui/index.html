@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Command Center</title>
-  <link rel="stylesheet" href="styles.css?v=20260330" />
+  <link rel="stylesheet" href="styles.css?v=20260401" />
 </head>
 <body>
   <!-- Login screen (shown when no valid token) -->
@@ -29,6 +29,7 @@
             <option value="">Loading...</option>
           </select>
           <button id="newProjectBtn" class="cc-project-add-btn" title="New Project">+</button>
+          <button id="deleteProjectBtn" class="cc-project-delete-btn" title="Delete Project">&times;</button>
         </div>
       </div>
       <div class="cc-header-actions">
@@ -218,7 +219,26 @@
     </div>
   </div>
 
+  <!-- Delete Project Confirmation Modal -->
+  <div id="deleteProjectModal" class="cc-modal-overlay" style="display: none">
+    <div class="cc-modal">
+      <div class="cc-modal-header">
+        <h3>Delete Project</h3>
+        <button id="deleteProjectCloseBtn" class="cc-modal-close">&times;</button>
+      </div>
+      <div class="cc-modal-body">
+        <p class="cc-delete-warning">This will stop the active Claude session and permanently remove all project data (tasks, threads, agents, knowledge base).</p>
+        <p class="cc-delete-project-name">Project: <strong id="deleteProjectName"></strong></p>
+        <div id="deleteProjectError" class="cc-form-error" style="display: none"></div>
+        <div class="cc-delete-actions">
+          <button id="deleteProjectCancelBtn" class="cc-header-btn">Cancel</button>
+          <button id="deleteProjectConfirmBtn" class="cc-form-submit cc-btn-danger">Delete Project</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="app.js?v=20260330"></script>
+  <script src="app.js?v=20260401"></script>
 </body>
 </html>
