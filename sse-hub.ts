@@ -41,8 +41,10 @@ export class SseHub {
     const client: SseClient = { res, projectId };
     this.clients.add(client);
 
-    // Replay last 50 events for this project
-    const projectHistory = this.history.filter((e) => (e as any)._projectId === projectId).slice(-50);
+    // Replay last 50 events for this project (global clients get all events)
+    const projectHistory = this.history.filter((e) =>
+      projectId === "_global" || (e as any)._projectId === projectId || (e as any)._projectId === "_global"
+    ).slice(-50);
     for (const event of projectHistory) {
       this.writeEvent(res, event);
     }
@@ -68,9 +70,28 @@ export class SseHub {
     }
 
     for (const client of this.clients) {
-      if (client.projectId === projectId) {
+      if (client.projectId === projectId || client.projectId === "_global") {
         this.writeEvent(client.res, event);
       }
+    }
+  }
+
+  /** Publish an event to ALL connected clients (global broadcast). */
+  publishGlobal(type: string, payload: unknown): void {
+    const event: SseEvent & { _projectId?: string } = {
+      ts: new Date().toISOString(),
+      type,
+      payload,
+    };
+
+    const stored = { ...event, _projectId: "_global" };
+    this.history.push(stored);
+    if (this.history.length > SseHub.MAX_HISTORY) {
+      this.history.splice(0, this.history.length - SseHub.MAX_HISTORY);
+    }
+
+    for (const client of this.clients) {
+      this.writeEvent(client.res, event);
     }
   }
 

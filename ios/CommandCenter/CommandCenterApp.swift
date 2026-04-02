@@ -59,6 +59,10 @@ struct CommandCenterApp: App {
         threadStore.onHealthEvent = { type, payload in
             healthStore.handleHealthEvent(type: type, payload: payload)
         }
+        threadStore.onProjectEvent = { _, _ in
+            // Refresh project list when projects are created/deleted/updated
+            Task { await projectStore.load() }
+        }
         threadStore.onReconnect = {
             // Auto-reload all data when SSE reconnects
             Task {
