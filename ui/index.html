@@ -122,6 +122,31 @@
           <h2>Project Board</h2>
           <span id="boardLastUpdated" class="cc-badge"></span>
         </div>
+        <div id="boardFilters" class="cc-board-filters">
+          <input id="boardSearch" class="cc-board-search" type="text" placeholder="Search tasks..." autocomplete="off" />
+          <select id="boardFilterState" class="cc-board-filter-select">
+            <option value="">All states</option>
+            <option value="created">Created</option>
+            <option value="assigned">Assigned</option>
+            <option value="in_progress">In Progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="in_review">In Review</option>
+            <option value="qa">QA</option>
+            <option value="done">Done</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="boardFilterPriority" class="cc-board-filter-select">
+            <option value="">All priorities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+          <select id="boardFilterAssignee" class="cc-board-filter-select">
+            <option value="">All assignees</option>
+          </select>
+          <button id="boardFilterClear" class="cc-board-filter-clear" title="Clear filters">Clear</button>
+        </div>
         <div id="boardColumns" class="cc-board">
           <!-- Kanban columns rendered by JS -->
         </div>

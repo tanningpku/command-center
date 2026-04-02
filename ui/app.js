@@ -59,6 +59,7 @@ const state = {
   chatHasMore: false,        // true if more messages available before current page
   chatOldestTimestamp: null,  // createdAt of earliest loaded message
   donePage: 0,               // current page index for Done column pagination
+  boardFilters: { search: '', state: '', priority: '', assignee: '' },
 };
 
 // ── DOM References ───────────────────────────────────────────────
@@ -568,6 +569,7 @@ async function loadTeamData() {
     const data = await apiCall('/api/assistants');
     const assistants = data.assistants || data || [];
     state.teamData = assistants;
+    populateBoardAssigneeFilter();
     renderTeam();
   } catch (err) {
     console.error('Failed to load team:', err);
@@ -843,17 +845,36 @@ const COLUMN_TO_TASK_STATE = {
   'Done': 'done',
 };
 
+function populateBoardAssigneeFilter() {
+  const select = document.getElementById('boardFilterAssignee');
+  const current = select.value;
+  const agents = state.teamData || [];
+  select.innerHTML = '<option value="">All assignees</option>' +
+    agents.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name || a.id)}</option>`).join('');
+  select.value = current; // preserve selection
+}
+
 async function loadBoardData() {
   if (!state.selectedProjectId) return;
 
   dom.boardColumns.innerHTML = `<div class="cc-loading">Loading board...</div>`;
 
   try {
+    // Build query params from filters
+    const params = new URLSearchParams();
+    const f = state.boardFilters;
+    if (f.search) params.set('search', f.search);
+    if (f.state) params.set('state', f.state);
+    if (f.priority) params.set('priority', f.priority);
+    if (f.assignee) params.set('assignee', f.assignee);
+    const qs = params.toString();
+
     // Try tasks first — if tasks exist, render task-based board
-    const taskData = await apiCall('/api/tasks');
+    const taskData = await apiCall('/api/tasks' + (qs ? '?' + qs : ''));
     const tasks = taskData.tasks || [];
 
-    if (tasks.length > 0) {
+    if (tasks.length > 0 || qs) {
+      // Render task-based board (even if empty when filters are active)
       renderBoardFromTasks(tasks);
       dom.boardLastUpdated.textContent = `Updated ${timeAgo(new Date().toISOString())}`;
       return;
@@ -2332,6 +2353,41 @@ document.getElementById('newThreadForm').addEventListener('submit', submitNewThr
 document.getElementById('participantPicker').addEventListener('click', (e) => {
   const chip = e.target.closest('.cc-participant-chip');
   if (chip) chip.classList.toggle('selected');
+});
+
+// ── Board Filters ───────────────────────────────────────────────
+let _boardSearchTimer = null;
+
+document.getElementById('boardSearch').addEventListener('input', (e) => {
+  clearTimeout(_boardSearchTimer);
+  _boardSearchTimer = setTimeout(() => {
+    state.boardFilters.search = e.target.value.trim();
+    loadBoardData();
+  }, 300);
+});
+
+document.getElementById('boardFilterState').addEventListener('change', (e) => {
+  state.boardFilters.state = e.target.value;
+  loadBoardData();
+});
+
+document.getElementById('boardFilterPriority').addEventListener('change', (e) => {
+  state.boardFilters.priority = e.target.value;
+  loadBoardData();
+});
+
+document.getElementById('boardFilterAssignee').addEventListener('change', (e) => {
+  state.boardFilters.assignee = e.target.value;
+  loadBoardData();
+});
+
+document.getElementById('boardFilterClear').addEventListener('click', () => {
+  state.boardFilters = { search: '', state: '', priority: '', assignee: '' };
+  document.getElementById('boardSearch').value = '';
+  document.getElementById('boardFilterState').value = '';
+  document.getElementById('boardFilterPriority').value = '';
+  document.getElementById('boardFilterAssignee').value = '';
+  loadBoardData();
 });
 
 // Board card click — navigate to task thread, or paginate Done column

@@ -606,6 +606,68 @@ body {
   color: var(--cc-text-faint);
 }
 
+/* ── Board Filters ────────────────────────────────────────────── */
+.cc-board-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.cc-board-search {
+  flex: 1 1 180px;
+  min-width: 140px;
+  max-width: 280px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--cc-font);
+  color: var(--cc-text);
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  outline: none;
+  transition: border-color var(--cc-transition);
+}
+
+.cc-board-search:focus {
+  border-color: var(--cc-accent);
+}
+
+.cc-board-filter-select {
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--cc-font);
+  color: var(--cc-text-secondary);
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--cc-transition);
+}
+
+.cc-board-filter-select:focus {
+  border-color: var(--cc-accent);
+}
+
+.cc-board-filter-clear {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: var(--cc-font);
+  color: var(--cc-text-muted);
+  background: transparent;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  cursor: pointer;
+  transition: all var(--cc-transition);
+}
+
+.cc-board-filter-clear:hover {
+  color: var(--cc-text);
+  border-color: var(--cc-text-muted);
+}
+
 /* ── Board (Kanban) ─────────────────────────────────────────────── */
 .cc-board {
   display: flex;
