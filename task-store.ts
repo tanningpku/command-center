@@ -167,6 +167,14 @@ export class TaskStore {
     };
   }
 
+  /** Returns the ISO timestamp of the most recent task_event for a given task, or null. */
+  getLastEventTime(taskId: string): string | null {
+    const row = this.db.prepare(
+      `SELECT timestamp FROM task_events WHERE task_id = ? ORDER BY timestamp DESC LIMIT 1`,
+    ).get(taskId) as { timestamp: string } | undefined;
+    return row?.timestamp ?? null;
+  }
+
   /** Quick DB health check — returns true if a simple query succeeds. */
   checkHealth(): boolean {
     try {
