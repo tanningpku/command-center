@@ -27,6 +27,7 @@ class ProjectStore {
         error = nil
         do {
             let response = try await api.fetchRegistry()
+            let previousId = selectedId
             projects = response.projects
             // Auto-select persisted project or first available
             if selectedId == nil || !projects.contains(where: { $0.id == selectedId }) {
@@ -35,6 +36,10 @@ class ProjectStore {
             // Push project to API service
             if let id = selectedId {
                 await api.setProject(id)
+            }
+            // If selected project changed (e.g. deleted), reconnect SSE
+            if selectedId != previousId {
+                NotificationCenter.default.post(name: .projectChanged, object: nil)
             }
         } catch {
             self.error = error.localizedDescription
