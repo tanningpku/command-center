@@ -105,6 +105,10 @@ export class Gateway {
   private readonly authTokens: Set<string> = new Set();
   private readonly authPassword: string | undefined = process.env.CC_PASSWORD;
 
+  /* ---- Stale task nudge ---- */
+  private readonly nudgedTasks: Map<string, number> = new Map(); // taskId → last nudge timestamp ms
+  private staleTaskTimer?: ReturnType<typeof setInterval>;
+
   /* ---- Health metrics ---- */
   private readonly gatewayStartedAt = Date.now();
   private requestCount = 0;
@@ -213,12 +217,16 @@ export class Gateway {
       await this.startAgentBridge(id, project, "captain");
     }
 
+    // Stale task nudge — check every 5 minutes
+    this.staleTaskTimer = setInterval(() => this.checkStaleTasks(), 5 * 60 * 1000);
+
     this.server.listen(this.port, () => {
       console.log(`[gateway] Command Center listening on http://localhost:${this.port}`);
     });
   }
 
   stop(): void {
+    if (this.staleTaskTimer) clearInterval(this.staleTaskTimer);
     for (const plugin of this.githubPlugins.values()) plugin.shutdown();
     for (const [id, bridge] of this.claudeBridges) {
       console.log(`[gateway] Stopping Claude bridge for ${id}`);
@@ -1085,6 +1093,75 @@ export class Gateway {
     this.sseHub.publishGlobal("project_deleted", { projectId });
 
     this.sendJson(res, 200, { deleted: projectId });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Stale task nudge                                                 */
+  /* ---------------------------------------------------------------- */
+
+  private checkStaleTasks(): void {
+    const STALE_MS = 30 * 60 * 1000; // 30 minutes
+    const now = Date.now();
+
+    for (const [projectId] of this.projects) {
+      const taskStore = this.taskStores.get(projectId);
+      const threadStore = this.threadStores.get(projectId);
+      if (!taskStore || !threadStore) continue;
+
+      const activeTasks = taskStore.list({ state: "in_progress" })
+        .concat(taskStore.list({ state: "assigned" }));
+
+      for (const task of activeTasks) {
+        if (!task.threadId) continue;
+
+        // Find last activity: max of task event time, thread message time, task updatedAt
+        const lastEventTime = taskStore.getLastEventTime(task.id);
+        const lastMsgTime = threadStore.getLastMessageTime(task.threadId);
+
+        const candidates = [new Date(task.updatedAt).getTime()];
+        if (lastEventTime) candidates.push(new Date(lastEventTime).getTime());
+        if (lastMsgTime) candidates.push(new Date(lastMsgTime).getTime());
+        const lastActivity = Math.max(...candidates);
+
+        if (now - lastActivity < STALE_MS) {
+          // Task is active — clear any prior nudge tracking
+          this.nudgedTasks.delete(task.id);
+          continue;
+        }
+
+        // Stale — check if we already nudged since last activity
+        const lastNudge = this.nudgedTasks.get(task.id);
+        if (lastNudge && lastNudge > lastActivity) continue;
+
+        // Send nudge
+        const mins = Math.round((now - lastActivity) / 60000);
+        this.dispatchMessage({
+          projectId,
+          threadId: task.threadId,
+          sender: { id: "system", type: "system" },
+          channel: "thread",
+          mode: "text",
+          content: `⏰ This task has had no activity for ${mins} minutes. @${task.assignee ?? "assignee"} — please post a progress update, or mark the task as blocked/done if appropriate.`,
+          kind: "system",
+          source: "stale-task-nudge",
+        });
+        this.nudgedTasks.set(task.id, now);
+        console.log(`[gateway] Stale task nudge sent for ${task.id} in project ${projectId} (${mins}min idle)`);
+      }
+    }
+
+    // Clean up nudge tracking for tasks that are no longer active
+    for (const taskId of this.nudgedTasks.keys()) {
+      let found = false;
+      for (const [, taskStore] of this.taskStores) {
+        const task = taskStore.get(taskId);
+        if (task && (task.state === "in_progress" || task.state === "assigned")) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) this.nudgedTasks.delete(taskId);
+    }
   }
 
   /** Post a health-related system message to the project's main thread. */

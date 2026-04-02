@@ -247,6 +247,14 @@ export class ThreadStore {
     return rows.reverse().map((r: any) => this.rowToMessage(r));
   }
 
+  /** Returns the ISO timestamp of the most recent message in a thread, or null. */
+  getLastMessageTime(threadId: string): string | null {
+    const row = this.db.prepare(
+      `SELECT created_at FROM chat_messages WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1`,
+    ).get(threadId) as { created_at: string } | undefined;
+    return row?.created_at ?? null;
+  }
+
   /* ---- Read receipts ---- */
 
   markRead(threadId: string, userId: string): void {
