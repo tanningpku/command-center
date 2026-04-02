@@ -57,6 +57,9 @@ case "${1:-help}" in
           case "$1" in
             --state) QUERY="${QUERY}&state=$2"; shift 2;;
             --assignee) QUERY="${QUERY}&assignee=$2"; shift 2;;
+            --priority) QUERY="${QUERY}&priority=$2"; shift 2;;
+            --search) QUERY="${QUERY}&search=$2"; shift 2;;
+            --labels) QUERY="${QUERY}&labels=$2"; shift 2;;
             *) shift;;
           esac
         done
@@ -814,7 +817,7 @@ for b in bridges:
     echo ""
     echo "Task Management:"
     echo "  task create   --title <t> [--priority <p>] [--assignee <a>] [--collaborators <c1,c2>] [--github-issue <n>]"
-    echo "  task list     [--state <s>] [--assignee <a>]"
+    echo "  task list     [--state <s>] [--assignee <a>] [--priority <p>] [--search <q>] [--labels <l1,l2>]"
     echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>]"
     echo "  task complete --id <id> [--note <n>]"
     echo "  task subscribe --id <id>  Subscribe to task updates"

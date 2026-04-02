@@ -107,11 +107,23 @@ export class TaskStore {
     return row ? this.rowToTask(row) : null;
   }
 
-  list(opts?: { state?: string; assignee?: string; limit?: number }): Task[] {
+  list(opts?: { state?: string; assignee?: string; priority?: string; labels?: string[]; search?: string; limit?: number }): Task[] {
     const conds: string[] = [];
     const params: any[] = [];
     if (opts?.state && opts.state !== "all") { conds.push("state = ?"); params.push(opts.state); }
     if (opts?.assignee) { conds.push("assignee = ?"); params.push(opts.assignee); }
+    if (opts?.priority) { conds.push("priority = ?"); params.push(opts.priority); }
+    if (opts?.search) {
+      conds.push("(title LIKE ? OR description LIKE ?)");
+      const term = `%${opts.search}%`;
+      params.push(term, term);
+    }
+    if (opts?.labels?.length) {
+      for (const label of opts.labels) {
+        conds.push("labels LIKE ?");
+        params.push(`%${JSON.stringify(label).slice(1, -1)}%`);
+      }
+    }
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const rows = this.db.prepare(
       `SELECT * FROM tasks ${where} ORDER BY
