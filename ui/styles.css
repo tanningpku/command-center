@@ -205,6 +205,58 @@ body {
   background: var(--cc-accent-bg);
 }
 
+.cc-project-delete-btn {
+  background: transparent;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  color: var(--cc-text-faint);
+  font-size: 16px;
+  font-weight: 400;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--cc-transition);
+  padding: 0;
+  line-height: 1;
+}
+
+.cc-project-delete-btn:hover {
+  border-color: #f85149;
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.cc-delete-warning {
+  color: #f85149;
+  font-size: 13px;
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.cc-delete-project-name {
+  font-size: 13px;
+  color: var(--cc-text-secondary);
+  margin: 0 0 16px 0;
+}
+
+.cc-delete-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cc-btn-danger {
+  background: #da3633 !important;
+  border-color: #f85149 !important;
+}
+
+.cc-btn-danger:hover {
+  background: #f85149 !important;
+}
+
 .cc-header-actions {
   display: flex;
   gap: 8px;
