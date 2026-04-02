@@ -76,7 +76,11 @@ struct CommandCenterApp: App {
 
     private func reconnectSSE() {
         guard let projectId = projectStore.selectedId,
-              let baseURL = AppConfig.baseURL else { return }
+              let baseURL = AppConfig.baseURL else {
+            // No project selected (e.g. all projects deleted) — tear down stale SSE
+            threadStore.disconnectSSE()
+            return
+        }
         healthStore.activeProjectId = projectId
         threadStore.connectSSE(baseURL: baseURL, projectId: projectId)
     }
