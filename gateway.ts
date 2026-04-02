@@ -1060,13 +1060,19 @@ export class Gateway {
       }
     }
 
-    // Remove stores
+    // Remove stores and delete persisted databases
     this.taskStores.delete(projectId);
     this.agentStores.delete(projectId);
     this.threadStores.delete(projectId);
+    for (const suffix of ["tasks", "agents", "threads"]) {
+      const dbPath = path.join(this.dataDir, `${projectId}-${suffix}.db`);
+      if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    }
     for (const [key] of this.kbManagers) {
       if (key.startsWith(projectId + ":")) this.kbManagers.delete(key);
     }
+    const plugin = this.githubPlugins.get(projectId);
+    if (plugin) plugin.shutdown();
     this.githubPlugins.delete(projectId);
 
     // Remove YAML config file
