@@ -878,6 +878,7 @@ async function loadBoardData() {
   if (!state.teamData || state.teamData.length === 0) {
     try {
       const data = await apiCall('/api/assistants');
+      if (seq !== _boardLoadSeq) return; // stale — project switched
       state.teamData = data.assistants || data || [];
     } catch { /* ignore — filter will just be empty */ }
   }
@@ -913,9 +914,12 @@ async function loadBoardData() {
     // Tasks endpoint failed — fall through to GitHub issues
   }
 
+  if (seq !== _boardLoadSeq) return; // stale after task fetch
+
   try {
     // Fallback: raw GitHub issues board
     const data = await apiCall('/api/board');
+    if (seq !== _boardLoadSeq) return; // stale response
     if (data.columns) {
       renderBoardFromColumns(data.columns);
       dom.boardLastUpdated.textContent = data.lastUpdated ? `Updated ${timeAgo(data.lastUpdated)}` : '';
