@@ -89,6 +89,7 @@ export class ThreadStore {
       )
     `);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_thread ON chat_messages(thread_id, created_at)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_sender ON chat_messages(sender, created_at)`);
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS thread_reads (
