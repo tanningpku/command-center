@@ -48,6 +48,22 @@ class BoardStore {
         tasks.filter { $0.state == state }
     }
 
+    func createTask(title: String, description: String?, priority: String, assignee: String?) async throws {
+        let task = try await api.createTask(title: title, description: description, priority: priority, assignee: assignee)
+        if !tasks.contains(where: { $0.id == task.id }) {
+            tasks.append(task)
+        }
+        HapticManager.success()
+    }
+
+    func updateTaskState(id: String, state: TaskState) async throws {
+        let task = try await api.updateTask(id: id, state: state.rawValue)
+        if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[idx] = task
+        }
+        HapticManager.medium()
+    }
+
     /// Handle task SSE events
     func handleTaskEvent(type: String, payload: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),

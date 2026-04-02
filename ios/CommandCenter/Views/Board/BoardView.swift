@@ -6,6 +6,7 @@ struct BoardView: View {
     @Environment(ProjectStore.self) var projectStore
     @State private var selectedTask: CCTask?
     @State private var collapsedSections: Set<TaskState> = []
+    @State private var showCreateSheet = false
 
     /// Only show sections that have tasks
     private var activeSections: [TaskState] {
@@ -73,13 +74,23 @@ struct BoardView: View {
                     ProjectSelectorView()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Text("\(boardStore.tasks.count) tasks")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Text("\(boardStore.tasks.count) tasks")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showCreateSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
                 }
             }
             .sheet(item: $selectedTask) { task in
                 TaskDetailSheet(task: task)
+            }
+            .sheet(isPresented: $showCreateSheet) {
+                CreateTaskSheet()
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 StaleBanner(isStale: boardStore.isStale)
