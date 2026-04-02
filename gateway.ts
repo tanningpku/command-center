@@ -106,7 +106,7 @@ export class Gateway {
   private readonly authPassword: string | undefined = process.env.CC_PASSWORD;
 
   /* ---- Stale task nudge ---- */
-  private readonly nudgedTasks: Map<string, number> = new Map(); // taskId → last nudge timestamp ms
+  private readonly nudgedTasks: Map<string, number> = new Map(); // "projectId:taskId" → last nudge timestamp ms
   private staleTaskTimer?: ReturnType<typeof setInterval>;
 
   /* ---- Health metrics ---- */
@@ -1102,17 +1102,20 @@ export class Gateway {
   private checkStaleTasks(): void {
     const STALE_MS = 30 * 60 * 1000; // 30 minutes
     const now = Date.now();
+    const activeKeys = new Set<string>();
 
     for (const [projectId] of this.projects) {
       const taskStore = this.taskStores.get(projectId);
       const threadStore = this.threadStores.get(projectId);
       if (!taskStore || !threadStore) continue;
 
-      const activeTasks = taskStore.list({ state: "in_progress" })
-        .concat(taskStore.list({ state: "assigned" }));
+      const activeTasks = taskStore.list({ state: "in_progress", limit: 10000 })
+        .concat(taskStore.list({ state: "assigned", limit: 10000 }));
 
       for (const task of activeTasks) {
         if (!task.threadId) continue;
+        const key = `${projectId}:${task.id}`;
+        activeKeys.add(key);
 
         // Find last activity: max of task event time, thread message time, task updatedAt
         const lastEventTime = taskStore.getLastEventTime(task.id);
@@ -1125,12 +1128,12 @@ export class Gateway {
 
         if (now - lastActivity < STALE_MS) {
           // Task is active — clear any prior nudge tracking
-          this.nudgedTasks.delete(task.id);
+          this.nudgedTasks.delete(key);
           continue;
         }
 
         // Stale — check if we already nudged since last activity
-        const lastNudge = this.nudgedTasks.get(task.id);
+        const lastNudge = this.nudgedTasks.get(key);
         if (lastNudge && lastNudge > lastActivity) continue;
 
         // Send nudge
@@ -1145,22 +1148,14 @@ export class Gateway {
           kind: "system",
           source: "stale-task-nudge",
         });
-        this.nudgedTasks.set(task.id, now);
+        this.nudgedTasks.set(key, now);
         console.log(`[gateway] Stale task nudge sent for ${task.id} in project ${projectId} (${mins}min idle)`);
       }
     }
 
     // Clean up nudge tracking for tasks that are no longer active
-    for (const taskId of this.nudgedTasks.keys()) {
-      let found = false;
-      for (const [, taskStore] of this.taskStores) {
-        const task = taskStore.get(taskId);
-        if (task && (task.state === "in_progress" || task.state === "assigned")) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) this.nudgedTasks.delete(taskId);
+    for (const key of this.nudgedTasks.keys()) {
+      if (!activeKeys.has(key)) this.nudgedTasks.delete(key);
     }
   }
 
