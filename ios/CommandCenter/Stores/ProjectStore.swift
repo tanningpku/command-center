@@ -53,6 +53,17 @@ class ProjectStore {
         await select(project.id)
     }
 
+    func deleteProject(id: String) async throws {
+        try await api.deleteProject(id: id)
+        projects.removeAll { $0.id == id }
+        // If we deleted the selected project, switch to next available
+        if selectedId == id {
+            selectedId = projects.first?.id
+            await api.setProject(selectedId)
+            NotificationCenter.default.post(name: .projectChanged, object: nil)
+        }
+    }
+
     func select(_ id: String) async {
         selectedId = id
         await api.setProject(id)

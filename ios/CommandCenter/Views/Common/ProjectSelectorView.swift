@@ -7,6 +7,8 @@ struct ProjectSelectorView: View {
     @State private var newProjectName = ""
     @State private var isCreating = false
     @State private var createError: String?
+    @State private var projectToDelete: Project?
+    @State private var deleteError: String?
 
     var body: some View {
         Menu {
@@ -29,6 +31,18 @@ struct ProjectSelectorView: View {
                 showingCreateSheet = true
             } label: {
                 Label("New Project…", systemImage: "plus")
+            }
+
+            Menu {
+                ForEach(projectStore.projects) { project in
+                    Button(role: .destructive) {
+                        projectToDelete = project
+                    } label: {
+                        Text(project.name)
+                    }
+                }
+            } label: {
+                Label("Delete Project…", systemImage: "trash")
             }
         } label: {
             HStack(spacing: 4) {
@@ -62,6 +76,33 @@ struct ProjectSelectorView: View {
                 Text("Enter a name for the new project.")
             }
         }
+        .alert("Delete Project?", isPresented: .init(
+            get: { projectToDelete != nil },
+            set: { if !$0 { projectToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                projectToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let project = projectToDelete {
+                    Task { await deleteProject(project) }
+                }
+            }
+        } message: {
+            if let project = projectToDelete {
+                Text("This will stop all Claude sessions and permanently remove \"\(project.name)\" and its data.")
+            }
+        }
+        .alert("Delete Failed", isPresented: .init(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK") { deleteError = nil }
+        } message: {
+            if let deleteError {
+                Text(deleteError)
+            }
+        }
     }
 
     private func createProject() async {
@@ -76,5 +117,14 @@ struct ProjectSelectorView: View {
             createError = error.localizedDescription
         }
         isCreating = false
+    }
+
+    private func deleteProject(_ project: Project) async {
+        do {
+            try await projectStore.deleteProject(id: project.id)
+        } catch {
+            deleteError = error.localizedDescription
+        }
+        projectToDelete = nil
     }
 }
