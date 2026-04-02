@@ -1769,8 +1769,12 @@ export class Gateway {
       const url = new URL(req.url ?? "/", `http://localhost`);
       const state = url.searchParams.get("state") ?? undefined;
       const assignee = url.searchParams.get("assignee") ?? undefined;
+      const priority = url.searchParams.get("priority") ?? undefined;
+      const search = url.searchParams.get("search") ?? undefined;
+      const labelsParam = url.searchParams.get("labels");
+      const labels = labelsParam ? labelsParam.split(",").map(l => l.trim()).filter(Boolean) : undefined;
       const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined;
-      this.sendJson(res, 200, { tasks: store.list({ state, assignee, limit }) });
+      this.sendJson(res, 200, { tasks: store.list({ state, assignee, priority, labels, search, limit }) });
       return;
     }
 
