@@ -59,9 +59,7 @@ class ProjectStore {
         // If we deleted the selected project, switch to next available
         if selectedId == id {
             selectedId = projects.first?.id
-            if let newId = selectedId {
-                await api.setProject(newId)
-            }
+            await api.setProject(selectedId)
             NotificationCenter.default.post(name: .projectChanged, object: nil)
         }
     }
