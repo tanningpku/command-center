@@ -290,6 +290,21 @@ export class ThreadStore {
     return result;
   }
 
+  /* ---- Agent message stats ---- */
+
+  getAgentMessageStats(sender: string): { lastActivity: string | null; messageCount: number } {
+    const countRow = this.db.prepare(
+      `SELECT COUNT(*) AS cnt FROM chat_messages WHERE sender = ?`,
+    ).get(sender) as { cnt: number };
+    const lastRow = this.db.prepare(
+      `SELECT created_at FROM chat_messages WHERE sender = ? ORDER BY created_at DESC LIMIT 1`,
+    ).get(sender) as { created_at: string } | undefined;
+    return {
+      lastActivity: lastRow?.created_at ?? null,
+      messageCount: countRow.cnt,
+    };
+  }
+
   /* ---- Private ---- */
 
   private rowToThread(row: any): Thread {
