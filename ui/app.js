@@ -187,6 +187,29 @@ async function apiPost(path, body) {
 }
 
 /**
+ * Make a PATCH API call through the gateway.
+ */
+async function apiPatch(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (state.selectedProjectId) {
+    headers['X-Project-Id'] = state.selectedProjectId;
+  }
+  const res = await fetch(path, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) { handle401(); throw new Error('Unauthorized'); }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
  * Make an API call with agent scope (adds agent query param for KB endpoints).
  */
 async function agentApiCall(path, agentId) {
@@ -812,6 +835,14 @@ const TASK_STATE_TO_COLUMN = {
   cancelled: 'Done',
 };
 
+// Reverse mapping: board column → target task state (for drag-and-drop)
+const COLUMN_TO_TASK_STATE = {
+  'Backlog': 'created',
+  'In Progress': 'in_progress',
+  'In Review': 'in_review',
+  'Done': 'done',
+};
+
 async function loadBoardData() {
   if (!state.selectedProjectId) return;
 
@@ -941,7 +972,7 @@ function renderTaskCard(task) {
 
   const threadId = task.threadId || '';
   return `
-    <div class="cc-board-card${threadId ? ' cc-board-card-clickable' : ''}" ${threadId ? `data-thread-id="${escapeHtml(threadId)}"` : ''}>
+    <div class="cc-board-card${threadId ? ' cc-board-card-clickable' : ''}" draggable="true" data-task-id="${escapeHtml(task.id)}" ${threadId ? `data-thread-id="${escapeHtml(threadId)}"` : ''}>
       <div class="cc-board-card-top">
         <span class="cc-board-card-number">${escapeHtml(task.id)}</span>
         ${priorityHtml}
@@ -2321,6 +2352,78 @@ document.getElementById('boardColumns').addEventListener('click', (e) => {
   if (threadId) {
     showTab('threads');
     selectThread(threadId);
+  }
+});
+
+// ── Board Drag-and-Drop ─────────────────────────────────────────
+const boardEl = document.getElementById('boardColumns');
+
+boardEl.addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.cc-board-card[data-task-id]');
+  if (!card) return;
+  card.classList.add('cc-board-card-dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', card.dataset.taskId);
+});
+
+boardEl.addEventListener('dragend', (e) => {
+  const card = e.target.closest('.cc-board-card');
+  if (card) card.classList.remove('cc-board-card-dragging');
+  // Remove all column highlights
+  boardEl.querySelectorAll('.cc-board-column-dragover').forEach(
+    col => col.classList.remove('cc-board-column-dragover')
+  );
+});
+
+boardEl.addEventListener('dragover', (e) => {
+  const column = e.target.closest('.cc-board-column');
+  if (!column) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Highlight only the hovered column
+  boardEl.querySelectorAll('.cc-board-column-dragover').forEach(
+    col => col !== column && col.classList.remove('cc-board-column-dragover')
+  );
+  column.classList.add('cc-board-column-dragover');
+});
+
+boardEl.addEventListener('dragleave', (e) => {
+  const column = e.target.closest('.cc-board-column');
+  if (!column) return;
+  // Only remove if we actually left this column (not entering a child)
+  if (!column.contains(e.relatedTarget)) {
+    column.classList.remove('cc-board-column-dragover');
+  }
+});
+
+boardEl.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  boardEl.querySelectorAll('.cc-board-column-dragover').forEach(
+    col => col.classList.remove('cc-board-column-dragover')
+  );
+
+  const column = e.target.closest('.cc-board-column');
+  if (!column) return;
+
+  const taskId = e.dataTransfer.getData('text/plain');
+  if (!taskId) return;
+
+  const targetCol = column.dataset.col;
+  const newState = COLUMN_TO_TASK_STATE[targetCol];
+  if (!newState) return;
+
+  // Skip if card is already in this column's state
+  const currentTask = (state._lastBoardTasks || []).find(t => t.id === taskId);
+  if (currentTask && TASK_STATE_TO_COLUMN[currentTask.state] === targetCol) return;
+
+  try {
+    await apiPatch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+      state: newState,
+      actor: 'user',
+    });
+    // SSE will trigger board refresh automatically
+  } catch (err) {
+    console.error('Failed to update task state:', err);
   }
 });
 
