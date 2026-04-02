@@ -274,6 +274,14 @@ function selectProject(projectId) {
   state.selectedProjectId = projectId;
   localStorage.setItem('cc-selectedProjectId', projectId);
 
+  // Reset project-specific state
+  state._projectUsesTasks = false;
+  state.boardFilters = { search: '', state: '', priority: '', assignee: '' };
+  document.getElementById('boardSearch').value = '';
+  document.getElementById('boardFilterState').value = '';
+  document.getElementById('boardFilterPriority').value = '';
+  document.getElementById('boardFilterAssignee').value = '';
+
   // Update the header dropdown to reflect current selection
   dom.projectSelect.value = projectId;
 
@@ -851,11 +859,24 @@ function populateBoardAssigneeFilter() {
   const agents = state.teamData || [];
   select.innerHTML = '<option value="">All assignees</option>' +
     agents.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name || a.id)}</option>`).join('');
-  select.value = current; // preserve selection
+  select.value = current;
+  // If previous selection is no longer valid, reset filter state
+  if (select.value !== current) {
+    state.boardFilters.assignee = '';
+  }
 }
 
 async function loadBoardData() {
   if (!state.selectedProjectId) return;
+
+  // Ensure assignee filter is populated
+  if (!state.teamData || state.teamData.length === 0) {
+    try {
+      const data = await apiCall('/api/assistants');
+      state.teamData = data.assistants || data || [];
+    } catch { /* ignore — filter will just be empty */ }
+  }
+  populateBoardAssigneeFilter();
 
   dom.boardColumns.innerHTML = `<div class="cc-loading">Loading board...</div>`;
 
@@ -873,7 +894,10 @@ async function loadBoardData() {
     const taskData = await apiCall('/api/tasks' + (qs ? '?' + qs : ''));
     const tasks = taskData.tasks || [];
 
-    if (tasks.length > 0 || qs) {
+    if (tasks.length > 0) {
+      state._projectUsesTasks = true;
+    }
+    if (tasks.length > 0 || (qs && state._projectUsesTasks)) {
       // Render task-based board (even if empty when filters are active)
       renderBoardFromTasks(tasks);
       dom.boardLastUpdated.textContent = `Updated ${timeAgo(new Date().toISOString())}`;
