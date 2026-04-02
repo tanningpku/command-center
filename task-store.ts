@@ -120,9 +120,10 @@ export class TaskStore {
     }
     if (opts?.labels?.length) {
       for (const label of opts.labels) {
-        // Match the exact JSON-encoded label string (e.g. "bug" not "debug")
-        conds.push("labels LIKE ?");
-        params.push(`%${JSON.stringify(label)}%`);
+        // Match the exact JSON-encoded label string, escaping LIKE wildcards
+        const escaped = JSON.stringify(label).replace(/[%_\\]/g, "\\$&");
+        conds.push("labels LIKE ? ESCAPE '\\'");
+        params.push(`%${escaped}%`);
       }
     }
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
