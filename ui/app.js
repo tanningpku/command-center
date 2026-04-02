@@ -2197,6 +2197,8 @@ function handleProjectDeleted(projectId) {
       state.eventSource = null;
     }
 
+    stopHealthPoll();
+
     if (state.projects.length > 0) {
       renderProjectList();
       selectProject(state.projects[0].id);
