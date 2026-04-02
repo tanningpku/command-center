@@ -9,6 +9,15 @@ class BoardStore {
     var isStale = false
     var error: String?
 
+    // Filter state
+    var searchText = ""
+    var filterPriority: TaskPriority?
+    var filterAssignee: String?
+
+    var isFiltered: Bool {
+        !searchText.isEmpty || filterPriority != nil || filterAssignee != nil
+    }
+
     private let api: APIService
 
     /// Kanban column definitions (non-terminal states shown as active columns)
@@ -24,11 +33,16 @@ class BoardStore {
         isLoading = true
         error = nil
         do {
-            let response = try await api.fetchTasks()
+            let search = searchText.trimmingCharacters(in: .whitespaces)
+            let response = try await api.fetchTasks(
+                assignee: filterAssignee,
+                priority: filterPriority?.rawValue,
+                search: search.isEmpty ? nil : search
+            )
             tasks = response.tasks
             isStale = false
-            // Cache for offline
-            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+            // Cache for offline (only cache unfiltered results)
+            if !isFiltered, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
                 CacheManager.save(response.tasks, key: Self.cacheKey, projectId: projectId)
             }
         } catch {
@@ -41,6 +55,12 @@ class BoardStore {
             self.error = error.localizedDescription
         }
         isLoading = false
+    }
+
+    func clearFilters() {
+        searchText = ""
+        filterPriority = nil
+        filterAssignee = nil
     }
 
     /// Tasks grouped by state for kanban columns
