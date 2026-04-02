@@ -89,6 +89,7 @@ export class ThreadStore {
       )
     `);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_thread ON chat_messages(thread_id, created_at)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_sender ON chat_messages(sender, created_at)`);
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS thread_reads (
@@ -288,6 +289,21 @@ export class ThreadStore {
       result.set(row.thread_id, row.unread_count);
     }
     return result;
+  }
+
+  /* ---- Agent message stats ---- */
+
+  getAgentMessageStats(sender: string): { lastActivity: string | null; messageCount: number } {
+    const countRow = this.db.prepare(
+      `SELECT COUNT(*) AS cnt FROM chat_messages WHERE sender = ?`,
+    ).get(sender) as { cnt: number };
+    const lastRow = this.db.prepare(
+      `SELECT created_at FROM chat_messages WHERE sender = ? ORDER BY created_at DESC LIMIT 1`,
+    ).get(sender) as { created_at: string } | undefined;
+    return {
+      lastActivity: lastRow?.created_at ?? null,
+      messageCount: countRow.cnt,
+    };
   }
 
   /* ---- Private ---- */

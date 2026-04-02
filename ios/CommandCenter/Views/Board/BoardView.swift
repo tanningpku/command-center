@@ -4,8 +4,11 @@ import SwiftUI
 struct BoardView: View {
     @Environment(BoardStore.self) var boardStore
     @Environment(ProjectStore.self) var projectStore
+    @Environment(TeamStore.self) var teamStore
     @State private var selectedTask: CCTask?
     @State private var collapsedSections: Set<TaskState> = []
+    @State private var showCreateSheet = false
+    @State private var showFilterSheet = false
 
     /// Only show sections that have tasks
     private var activeSections: [TaskState] {
@@ -13,6 +16,7 @@ struct BoardView: View {
     }
 
     var body: some View {
+        @Bindable var store = boardStore
         NavigationStack {
             Group {
                 if boardStore.isLoading && boardStore.tasks.isEmpty {
@@ -28,10 +32,21 @@ struct BoardView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 } else if boardStore.tasks.isEmpty {
-                    ContentUnavailableView("No Tasks", systemImage: "rectangle.split.3x1",
-                        description: Text("Tasks will appear here when created."))
+                    if boardStore.isFiltered {
+                        ContentUnavailableView.search(text: boardStore.searchText)
+                    } else {
+                        ContentUnavailableView("No Tasks", systemImage: "rectangle.split.3x1",
+                            description: Text("Tasks will appear here when created."))
+                    }
                 } else {
                     ScrollView {
+                        // Active filter chips
+                        if boardStore.isFiltered {
+                            BoardFilterChips(boardStore: boardStore)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
+                        }
+
                         LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                             ForEach(activeSections, id: \.self) { state in
                                 let tasks = boardStore.tasksForState(state)
@@ -68,18 +83,43 @@ struct BoardView: View {
             }
             .navigationTitle("Board")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $store.searchText, prompt: "Search tasks")
+            .onSubmit(of: .search) {
+                Task { await boardStore.loadTasks() }
+            }
+            .onChange(of: boardStore.searchText) { oldValue, newValue in
+                // Reload when search is cleared
+                if !oldValue.isEmpty && newValue.isEmpty {
+                    Task { await boardStore.loadTasks() }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProjectSelectorView()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Text("\(boardStore.tasks.count) tasks")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Button {
+                            showFilterSheet = true
+                        } label: {
+                            Image(systemName: boardStore.isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        }
+                        Button {
+                            showCreateSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
                 }
             }
             .sheet(item: $selectedTask) { task in
                 TaskDetailSheet(task: task)
+            }
+            .sheet(isPresented: $showCreateSheet) {
+                CreateTaskSheet()
+            }
+            .sheet(isPresented: $showFilterSheet) {
+                BoardFilterSheet()
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 StaleBanner(isStale: boardStore.isStale)
@@ -99,6 +139,135 @@ struct BoardView: View {
                 collapsedSections.insert(state)
             }
         }
+    }
+}
+
+/// Horizontal row of active filter chips with tap-to-remove.
+struct BoardFilterChips: View {
+    let boardStore: BoardStore
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if let priority = boardStore.filterPriority {
+                    FilterChip(label: priority.rawValue.capitalized, color: priority.color) {
+                        boardStore.filterPriority = nil
+                        Task { await boardStore.loadTasks() }
+                    }
+                }
+                if let assignee = boardStore.filterAssignee {
+                    FilterChip(label: assignee, color: .blue) {
+                        boardStore.filterAssignee = nil
+                        Task { await boardStore.loadTasks() }
+                    }
+                }
+                if boardStore.isFiltered {
+                    Button {
+                        boardStore.clearFilters()
+                        Task { await boardStore.loadTasks() }
+                    } label: {
+                        Text("Clear all")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct FilterChip: View {
+    let label: String
+    let color: Color
+    let onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.caption.weight(.medium))
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+        }
+    }
+}
+
+/// Sheet for selecting priority and assignee filters.
+struct BoardFilterSheet: View {
+    @Environment(BoardStore.self) var boardStore
+    @Environment(TeamStore.self) var teamStore
+    @Environment(\.dismiss) var dismiss
+
+    @State private var selectedPriority: TaskPriority?
+    @State private var selectedAssignee: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Priority") {
+                    Picker("Priority", selection: $selectedPriority) {
+                        Text("Any").tag(nil as TaskPriority?)
+                        ForEach([TaskPriority.critical, .high, .medium, .normal, .low], id: \.self) { p in
+                            HStack(spacing: 6) {
+                                Circle().fill(p.color).frame(width: 8, height: 8)
+                                Text(p.rawValue.capitalized)
+                            }
+                            .tag(p as TaskPriority?)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                Section("Assignee") {
+                    if teamStore.agents.isEmpty {
+                        Text("Loading agents...")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Assignee", selection: $selectedAssignee) {
+                            Text("Anyone").tag(nil as String?)
+                            ForEach(teamStore.agents) { agent in
+                                Text(agent.name).tag(agent.id as String?)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+            }
+            .navigationTitle("Filters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") { applyFilters() }
+                        .bold()
+                }
+            }
+            .onAppear {
+                selectedPriority = boardStore.filterPriority
+                selectedAssignee = boardStore.filterAssignee
+            }
+            .task {
+                if teamStore.agents.isEmpty {
+                    await teamStore.loadAgents()
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func applyFilters() {
+        boardStore.filterPriority = selectedPriority
+        boardStore.filterAssignee = selectedAssignee
+        dismiss()
+        Task { await boardStore.loadTasks() }
     }
 }
 

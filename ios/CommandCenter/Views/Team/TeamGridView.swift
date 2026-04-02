@@ -32,7 +32,7 @@ struct TeamGridView: View {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(teamStore.agents) { agent in
                                 NavigationLink(value: agent) {
-                                    AgentCardView(agent: agent)
+                                    AgentCardView(agent: agent, metrics: teamStore.agentMetrics[agent.id])
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -63,7 +63,10 @@ struct TeamGridView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 StaleBanner(isStale: teamStore.isStale)
             }
-            .task { await teamStore.loadAgents() }
+            .task {
+                await teamStore.loadAgents()
+                await teamStore.loadAllMetrics()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .projectChanged)) { _ in
                 Task { await teamStore.loadAgents() }
             }
@@ -74,15 +77,22 @@ struct TeamGridView: View {
 /// Card for a single agent in the grid.
 struct AgentCardView: View {
     let agent: CCAgent
+    var metrics: AgentMetrics?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 AgentAvatar(name: agent.name)
                 Spacer()
-                Circle()
-                    .fill(agent.statusColor)
-                    .frame(width: 8, height: 8)
+                if let metrics {
+                    Circle()
+                        .fill(metrics.bridgeStatusColor)
+                        .frame(width: 8, height: 8)
+                } else {
+                    Circle()
+                        .fill(agent.statusColor)
+                        .frame(width: 8, height: 8)
+                }
             }
 
             Text(agent.name)
@@ -93,6 +103,31 @@ struct AgentCardView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+
+            if let metrics {
+                Divider()
+                VStack(alignment: .leading, spacing: 3) {
+                    if let activity = metrics.relativeLastActivity {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                                .font(.caption2)
+                            Text(activity)
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    if let task = metrics.currentTask {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.cyan)
+                            Text(task.id)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
         }
         .padding(12)
         .background(Color(.secondarySystemGroupedBackground))

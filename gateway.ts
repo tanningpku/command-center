@@ -1556,6 +1556,43 @@ export class Gateway {
       return;
     }
 
+    // GET /api/agents/:id/metrics — agent activity metrics
+    if (method === "GET" && pathname.match(/^\/api\/agents\/[^/]+\/metrics$/)) {
+      const id = pathname.split("/")[3];
+      const agent = store.get(id);
+      if (!agent) { this.sendJson(res, 404, { error: `Agent not found: ${id}` }); return; }
+
+      // Bridge status and uptime
+      const bKey = this.bridgeKey(projectId, id);
+      const bridge = this.claudeBridges.get(bKey);
+      let bridgeStatus: "connected" | "disconnected" | "idle" = "idle";
+      let uptime = 0;
+      if (bridge) {
+        const health = bridge.getHealthInfo();
+        bridgeStatus = bridge.isReady() ? "connected" : "disconnected";
+        uptime = health.uptime_seconds;
+      }
+
+      // Message stats from thread store
+      const threadStore = this.threadStores.get(projectId);
+      const stats = threadStore?.getAgentMessageStats(id) ?? { lastActivity: null, messageCount: 0 };
+
+      // Current in_progress task
+      const taskStore = this.taskStores.get(projectId);
+      const currentTasks = taskStore?.list({ assignee: id, state: "in_progress", limit: 1 }) ?? [];
+      const currentTask = currentTasks.length > 0 ? { id: currentTasks[0].id, title: currentTasks[0].title } : null;
+
+      this.sendJson(res, 200, {
+        agentId: id,
+        lastActivity: stats.lastActivity,
+        messageCount: stats.messageCount,
+        currentTask,
+        uptime,
+        bridgeStatus,
+      });
+      return;
+    }
+
     if (method === "GET" && pathname.startsWith("/api/agents/")) {
       const id = pathname.split("/")[3];
       if (!id) { this.sendJson(res, 400, { error: "agent id required" }); return; }

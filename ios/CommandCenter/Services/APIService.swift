@@ -143,13 +143,49 @@ actor APIService {
         try await fetch("api/agents")
     }
 
+    func fetchAgentMetrics(agentId: String) async throws -> AgentMetrics {
+        try await fetch("api/agents/\(agentId)/metrics")
+    }
+
     // MARK: - Tasks
 
-    func fetchTasks(state: String? = nil, assignee: String? = nil) async throws -> TaskListResponse {
+    func fetchTasks(state: String? = nil, assignee: String? = nil, priority: String? = nil, search: String? = nil, labels: [String]? = nil) async throws -> TaskListResponse {
         var query: [(String, String)] = []
         if let state { query.append(("state", state)) }
         if let assignee { query.append(("assignee", assignee)) }
+        if let priority { query.append(("priority", priority)) }
+        if let search, !search.isEmpty { query.append(("search", search)) }
+        if let labels, !labels.isEmpty { query.append(("labels", labels.joined(separator: ","))) }
         return try await fetch("api/tasks", query: query)
+    }
+
+    func createTask(title: String, description: String? = nil, priority: String = "normal", assignee: String? = nil) async throws -> CCTask {
+        struct Body: Encodable {
+            let title: String
+            let description: String?
+            let priority: String
+            let assignee: String?
+            let createdBy: String
+        }
+        return try await post("api/tasks", body: Body(
+            title: title, description: description, priority: priority,
+            assignee: assignee, createdBy: "user"
+        ))
+    }
+
+    func updateTask(id: String, state: String? = nil, note: String? = nil) async throws -> CCTask {
+        struct Body: Encodable {
+            let state: String?
+            let latestUpdate: String?
+            let actor: String
+        }
+        let data = try JSONEncoder().encode(Body(state: state, latestUpdate: note, actor: "user"))
+        let req = request("api/tasks/\(id)", method: "PATCH", body: data)
+        let (responseData, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, 200...299 ~= http.statusCode else {
+            throw APIError.badResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        return try JSONDecoder().decode(CCTask.self, from: responseData)
     }
 
     // MARK: - Knowledge Base

@@ -48,6 +48,24 @@ struct TaskDetailSheet: View {
     let task: CCTask
     @Environment(\.dismiss) var dismiss
     @Environment(NavigationRouter.self) var router
+    @Environment(BoardStore.self) var boardStore
+
+    @State private var isUpdating = false
+    @State private var updateError: String?
+
+    /// Logical next states based on current state
+    private var availableTransitions: [TaskState] {
+        switch task.state {
+        case .created: [.assigned, .cancelled]
+        case .assigned: [.in_progress, .blocked, .cancelled]
+        case .in_progress: [.in_review, .blocked, .cancelled]
+        case .in_review: [.qa, .in_progress, .cancelled]
+        case .qa: [.done, .in_progress, .cancelled]
+        case .blocked: [.in_progress, .cancelled]
+        case .done: [.in_progress]
+        case .cancelled: [.created]
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -64,6 +82,42 @@ struct TaskDetailSheet: View {
                         LabeledContent("Assignee", value: assignee)
                     }
                     LabeledContent("Created by", value: task.createdBy)
+                }
+
+                if !availableTransitions.isEmpty {
+                    Section("Change State") {
+                        if isUpdating {
+                            HStack {
+                                Spacer()
+                                ProgressView("Updating...")
+                                Spacer()
+                            }
+                        } else {
+                            ForEach(availableTransitions, id: \.self) { newState in
+                                Button {
+                                    transitionTo(newState)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(newState.color)
+                                            .frame(width: 10, height: 10)
+                                        Text(newState.displayName)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Image(systemName: "arrow.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                            }
+                        }
+
+                        if let updateError {
+                            Text(updateError)
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                        }
+                    }
                 }
 
                 if !task.description.isEmpty {
@@ -114,6 +168,23 @@ struct TaskDetailSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func transitionTo(_ newState: TaskState) {
+        guard !isUpdating else { return }
+        isUpdating = true
+        updateError = nil
+
+        Task {
+            do {
+                try await boardStore.updateTaskState(id: task.id, state: newState)
+                dismiss()
+            } catch {
+                isUpdating = false
+                updateError = "Failed: \(error.localizedDescription)"
+                HapticManager.error()
+            }
+        }
     }
 }
 

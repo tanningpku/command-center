@@ -9,6 +9,15 @@ class BoardStore {
     var isStale = false
     var error: String?
 
+    // Filter state
+    var searchText = ""
+    var filterPriority: TaskPriority?
+    var filterAssignee: String?
+
+    var isFiltered: Bool {
+        !searchText.isEmpty || filterPriority != nil || filterAssignee != nil
+    }
+
     private let api: APIService
 
     /// Kanban column definitions (non-terminal states shown as active columns)
@@ -24,11 +33,16 @@ class BoardStore {
         isLoading = true
         error = nil
         do {
-            let response = try await api.fetchTasks()
+            let search = searchText.trimmingCharacters(in: .whitespaces)
+            let response = try await api.fetchTasks(
+                assignee: filterAssignee,
+                priority: filterPriority?.rawValue,
+                search: search.isEmpty ? nil : search
+            )
             tasks = response.tasks
             isStale = false
-            // Cache for offline
-            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+            // Cache for offline (only cache unfiltered results)
+            if !isFiltered, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
                 CacheManager.save(response.tasks, key: Self.cacheKey, projectId: projectId)
             }
         } catch {
@@ -43,9 +57,31 @@ class BoardStore {
         isLoading = false
     }
 
+    func clearFilters() {
+        searchText = ""
+        filterPriority = nil
+        filterAssignee = nil
+    }
+
     /// Tasks grouped by state for kanban columns
     func tasksForState(_ state: TaskState) -> [CCTask] {
         tasks.filter { $0.state == state }
+    }
+
+    func createTask(title: String, description: String?, priority: String, assignee: String?) async throws {
+        let task = try await api.createTask(title: title, description: description, priority: priority, assignee: assignee)
+        if !tasks.contains(where: { $0.id == task.id }) {
+            tasks.append(task)
+        }
+        HapticManager.success()
+    }
+
+    func updateTaskState(id: String, state: TaskState) async throws {
+        let task = try await api.updateTask(id: id, state: state.rawValue)
+        if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[idx] = task
+        }
+        HapticManager.medium()
     }
 
     /// Handle task SSE events
