@@ -14,6 +14,9 @@ class TeamStore {
     var kbContent: String?
     var isLoadingKB = false
 
+    // Agent metrics
+    var agentMetrics: [String: AgentMetrics] = [:]
+
     private let api: APIService
     private static let cacheKey = "agents"
 
@@ -40,6 +43,26 @@ class TeamStore {
             self.error = error.localizedDescription
         }
         isLoading = false
+    }
+
+    func loadAllMetrics() async {
+        await withTaskGroup(of: (String, AgentMetrics?).self) { group in
+            for agent in agents {
+                group.addTask { [api] in
+                    let metrics = try? await api.fetchAgentMetrics(agentId: agent.id)
+                    return (agent.id, metrics)
+                }
+            }
+            for await (id, metrics) in group {
+                if let metrics { agentMetrics[id] = metrics }
+            }
+        }
+    }
+
+    func loadMetrics(agentId: String) async {
+        if let metrics = try? await api.fetchAgentMetrics(agentId: agentId) {
+            agentMetrics[agentId] = metrics
+        }
     }
 
     func loadKBFiles(agentId: String) async {

@@ -67,3 +67,54 @@ struct CCAgent: Identifiable, Codable, Hashable {
 struct AgentListResponse: Codable {
     let agents: [CCAgent]
 }
+
+struct AgentMetrics: Codable {
+    let agentId: String
+    let lastActivity: String?
+    let messageCount: Int
+    let currentTask: AgentCurrentTask?
+    let uptime: Int // seconds
+    let bridgeStatus: String // "connected", "disconnected", "idle"
+
+    var bridgeStatusColor: Color {
+        switch bridgeStatus {
+        case "connected": .green
+        case "disconnected": .red
+        default: .gray
+        }
+    }
+
+    var formattedUptime: String {
+        let hours = uptime / 3600
+        let mins = (uptime % 3600) / 60
+        if hours > 0 { return "\(hours)h \(mins)m" }
+        if mins > 0 { return "\(mins)m" }
+        return "\(uptime)s"
+    }
+
+    var relativeLastActivity: String? {
+        guard let lastActivity else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: lastActivity) else {
+            // Try without fractional seconds
+            formatter.formatOptions = [.withInternetDateTime]
+            guard let date = formatter.date(from: lastActivity) else { return nil }
+            return Self.relativeString(from: date)
+        }
+        return Self.relativeString(from: date)
+    }
+
+    private static func relativeString(from date: Date) -> String {
+        let seconds = Int(-date.timeIntervalSinceNow)
+        if seconds < 60 { return "just now" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        if seconds < 86400 { return "\(seconds / 3600)h ago" }
+        return "\(seconds / 86400)d ago"
+    }
+}
+
+struct AgentCurrentTask: Codable {
+    let id: String
+    let title: String
+}
