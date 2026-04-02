@@ -34,6 +34,7 @@ class ThreadStore {
     var onAgentEvent: ((String, [String: Any]) -> Void)?
     var onTaskEvent: ((String, [String: Any]) -> Void)?
     var onHealthEvent: ((String, [String: Any]) -> Void)?
+    var onProjectEvent: ((String, [String: Any]) -> Void)?
 
     /// Called when SSE reconnects so views can reload data
     var onReconnect: (() -> Void)?
@@ -221,6 +222,9 @@ class ThreadStore {
             if let message = event.payload["message"] as? String {
                 captainThought = CaptainThought(agentName: "Captain", text: message)
             }
+
+        case "project_created", "project_deleted", "project_updated":
+            onProjectEvent?(event.type, event.payload)
 
         case "claude_ready", "claude_result":
             break
