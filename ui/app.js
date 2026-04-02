@@ -2201,6 +2201,8 @@ function handleProjectDeleted(projectId) {
   if (state.selectedProjectId === projectId) {
     state.selectedProjectId = null;
     localStorage.removeItem('cc-selectedProjectId');
+    state.activeThreadId = null;
+    localStorage.removeItem('cc-activeThreadId');
 
     stopHealthPoll();
 
