@@ -276,6 +276,7 @@ function selectProject(projectId) {
 
   // Reset project-specific state
   state._projectUsesTasks = false;
+  state.teamData = [];
   state.boardFilters = { search: '', state: '', priority: '', assignee: '' };
   document.getElementById('boardSearch').value = '';
   document.getElementById('boardFilterState').value = '';
