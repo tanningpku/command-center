@@ -143,6 +143,10 @@ actor APIService {
         try await fetch("api/agents")
     }
 
+    func fetchAgentMetrics(agentId: String) async throws -> AgentMetrics {
+        try await fetch("api/agents/\(agentId)/metrics")
+    }
+
     // MARK: - Tasks
 
     func fetchTasks(state: String? = nil, assignee: String? = nil, priority: String? = nil, search: String? = nil, labels: [String]? = nil) async throws -> TaskListResponse {

@@ -6,6 +6,8 @@ struct AgentDetailView: View {
     @Environment(TeamStore.self) var teamStore
     @State private var selectedFile: String?
 
+    private var metrics: AgentMetrics? { teamStore.agentMetrics[agent.id] }
+
     var body: some View {
         List {
             // Agent info section
@@ -26,6 +28,43 @@ struct AgentDetailView: View {
                             .foregroundStyle(.secondary)
                         Text(agent.role)
                             .font(.body)
+                    }
+                }
+            }
+
+            // Metrics section
+            if let metrics {
+                Section("Metrics") {
+                    LabeledContent("Bridge") {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(metrics.bridgeStatusColor)
+                                .frame(width: 8, height: 8)
+                            Text(metrics.bridgeStatus.capitalized)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+
+                    LabeledContent("Uptime", value: metrics.formattedUptime)
+
+                    LabeledContent("Messages", value: "\(metrics.messageCount)")
+
+                    if let activity = metrics.relativeLastActivity {
+                        LabeledContent("Last Activity", value: activity)
+                    }
+
+                    if let task = metrics.currentTask {
+                        LabeledContent("Current Task") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(task.id)
+                                    .font(.caption.monospaced().weight(.medium))
+                                    .foregroundStyle(.cyan)
+                                Text(task.title)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
                 }
             }
@@ -83,7 +122,9 @@ struct AgentDetailView: View {
         .navigationTitle(agent.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await teamStore.loadKBFiles(agentId: agent.id)
+            async let metricsLoad: () = teamStore.loadMetrics(agentId: agent.id)
+            async let kbLoad: () = teamStore.loadKBFiles(agentId: agent.id)
+            _ = await (metricsLoad, kbLoad)
             // Auto-load identity.md
             if teamStore.kbFiles.contains("identity.md") {
                 selectedFile = "identity.md"
