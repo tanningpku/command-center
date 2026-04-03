@@ -577,6 +577,17 @@ async function loadTeamData() {
   try {
     const data = await apiCall('/api/assistants');
     const assistants = data.assistants || data || [];
+
+    // Fetch metrics for each agent in parallel
+    const metricsResults = await Promise.allSettled(
+      assistants.map(a => apiCall(`/api/agents/${encodeURIComponent(a.id)}/metrics`))
+    );
+    assistants.forEach((agent, i) => {
+      if (metricsResults[i].status === 'fulfilled') {
+        agent._metrics = metricsResults[i].value;
+      }
+    });
+
     state.teamData = assistants;
     populateBoardAssigneeFilter();
     renderTeam();
@@ -635,6 +646,15 @@ function renderTeamCard(member) {
   const status = member.status || 'offline';
   const statusClass = status === 'online' || status === 'active' ? 'cc-status-online' : 'cc-status-offline';
   const statusLabel = status === 'online' || status === 'active' ? 'Online' : 'Offline';
+  const m = member._metrics || {};
+
+  // Current task badge
+  const taskHtml = m.currentTask
+    ? `<div class="cc-team-card-task"><span class="cc-team-card-task-id">${escapeHtml(m.currentTask.id)}</span> ${escapeHtml(m.currentTask.title)}</div>`
+    : '';
+
+  // Activity line from metrics (prefer metrics.lastActivity over member.lastActive)
+  const lastActivity = m.lastActivity || member.lastActive;
 
   return `
     <div class="cc-team-card cc-team-card-clickable" data-agent-id="${escapeHtml(member.id)}">
@@ -647,19 +667,25 @@ function renderTeamCard(member) {
       </div>
       ${member.role ? `<div class="cc-team-card-role">${escapeHtml(member.role)}</div>` : ''}
       ${member.description && !member.role ? `<div class="cc-team-detail" style="margin-bottom: 4px;">${escapeHtml(member.description)}</div>` : ''}
+      ${taskHtml}
       <div class="cc-team-card-status ${statusClass}">
         <span class="cc-status-dot"></span>
         ${escapeHtml(statusLabel)}
       </div>
       <div class="cc-team-card-details">
+        ${lastActivity ? `
+          <div class="cc-team-detail">
+            <span class="cc-team-detail-label">Active:</span> ${timeAgo(lastActivity)}
+          </div>
+        ` : ''}
+        ${m.messageCount != null ? `
+          <div class="cc-team-detail">
+            <span class="cc-team-detail-label">Messages:</span> ${m.messageCount}
+          </div>
+        ` : ''}
         ${member.threadCount != null ? `
           <div class="cc-team-detail">
             <span class="cc-team-detail-label">Threads:</span> ${member.threadCount}
-          </div>
-        ` : ''}
-        ${member.lastActive ? `
-          <div class="cc-team-detail">
-            <span class="cc-team-detail-label">Last active:</span> ${timeAgo(member.lastActive)}
           </div>
         ` : ''}
       </div>
@@ -709,6 +735,7 @@ function renderAgentDetailPanel() {
           <button class="cc-agent-detail-close" title="Close">&times;</button>
         </div>
         <div class="cc-agent-detail-tabs">
+          <button class="cc-agent-detail-tab ${activeTab === 'health' ? 'active' : ''}" data-detail-tab="health">Health</button>
           <button class="cc-agent-detail-tab ${activeTab === 'instruction' ? 'active' : ''}" data-detail-tab="instruction">System Instruction</button>
           <button class="cc-agent-detail-tab ${activeTab === 'kb' ? 'active' : ''}" data-detail-tab="kb">Knowledge Base</button>
         </div>
@@ -745,10 +772,99 @@ async function loadAgentDetailContent() {
 
   body.innerHTML = `<div class="cc-loading">Loading...</div>`;
 
-  if (state.agentDetailTab === 'instruction') {
+  if (state.agentDetailTab === 'health') {
+    await loadAgentHealth(body, state.agentDetailId);
+  } else if (state.agentDetailTab === 'instruction') {
     await loadAgentInstruction(body, state.agentDetailId);
   } else {
     await loadAgentKbList(body, state.agentDetailId);
+  }
+}
+
+async function loadAgentHealth(container, agentId) {
+  try {
+    const [metrics, healthData] = await Promise.all([
+      apiCall(`/api/agents/${encodeURIComponent(agentId)}/metrics`),
+      apiCall('/api/health'),
+    ]);
+
+    // Extract bridge info from health endpoint, scoped to selected project
+    const projectHealth = (healthData.projects || {})[state.selectedProjectId] || {};
+    const bridge = (projectHealth.bridges || {})[agentId] || null;
+
+    const bStatus = bridge ? bridge.status : (metrics.bridgeStatus || 'unknown');
+    const bColor = bridgeStatusColor(bStatus === 'connected' ? 'ready' : bStatus);
+    const uptime = bridge ? formatUptime(bridge.uptime_seconds) : (metrics.uptime != null ? formatUptime(metrics.uptime) : '--');
+    const restarts = bridge ? bridge.restart_count : '--';
+    const lastRestart = bridge && bridge.last_restart_reason ? bridge.last_restart_reason : '--';
+    const msgsRecv = bridge ? bridge.messages_received : '--';
+    const msgsSent = bridge ? bridge.messages_sent : '--';
+    const errors = bridge ? bridge.errors : '--';
+    const lastActivity = metrics.lastActivity ? timeAgo(metrics.lastActivity) : '--';
+    const totalMsgs = metrics.messageCount != null ? metrics.messageCount : '--';
+    const currentTask = metrics.currentTask;
+
+    container.innerHTML = `
+      <div class="cc-health-section">
+        <div class="cc-health-section-title">Connection</div>
+        <div class="cc-health-grid">
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Bridge Status</div>
+            <div class="cc-health-stat-value" style="color: ${bColor}">${escapeHtml(bStatus)}</div>
+          </div>
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Uptime</div>
+            <div class="cc-health-stat-value">${escapeHtml(uptime)}</div>
+          </div>
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Restarts</div>
+            <div class="cc-health-stat-value">${escapeHtml(String(restarts))}</div>
+          </div>
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Last Restart Reason</div>
+            <div class="cc-health-stat-value cc-health-stat-small">${escapeHtml(String(lastRestart))}</div>
+          </div>
+        </div>
+      </div>
+      <div class="cc-health-section">
+        <div class="cc-health-section-title">Activity</div>
+        <div class="cc-health-grid">
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Last Activity</div>
+            <div class="cc-health-stat-value">${escapeHtml(lastActivity)}</div>
+          </div>
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Thread Messages</div>
+            <div class="cc-health-stat-value">${escapeHtml(String(totalMsgs))}</div>
+          </div>
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Bridge Msgs Received</div>
+            <div class="cc-health-stat-value">${escapeHtml(String(msgsRecv))}</div>
+          </div>
+          <div class="cc-health-stat">
+            <div class="cc-health-stat-label">Bridge Msgs Sent</div>
+            <div class="cc-health-stat-value">${escapeHtml(String(msgsSent))}</div>
+          </div>
+        </div>
+      </div>
+      ${currentTask ? `
+      <div class="cc-health-section">
+        <div class="cc-health-section-title">Current Task</div>
+        <div class="cc-health-task">
+          <span class="cc-health-task-id">${escapeHtml(currentTask.id)}</span>
+          ${escapeHtml(currentTask.title)}
+        </div>
+      </div>
+      ` : ''}
+      ${errors > 0 ? `
+      <div class="cc-health-section">
+        <div class="cc-health-section-title" style="color: var(--cc-red)">Errors</div>
+        <div class="cc-health-stat-value" style="color: var(--cc-red)">${escapeHtml(String(errors))} bridge errors</div>
+      </div>
+      ` : ''}
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="cc-agent-detail-empty">Unable to load health data: ${escapeHtml(err.message)}</div>`;
   }
 }
 
