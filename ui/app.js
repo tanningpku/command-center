@@ -697,7 +697,7 @@ function renderTeamCard(member) {
 
 function openAgentDetail(agentId) {
   state.agentDetailId = agentId;
-  state.agentDetailTab = 'health';
+  state.agentDetailTab = 'instruction';
   renderAgentDetailPanel();
 }
 
@@ -788,15 +788,9 @@ async function loadAgentHealth(container, agentId) {
       apiCall('/api/health'),
     ]);
 
-    // Extract bridge info from health endpoint
-    const projectBridges = healthData.projects || {};
-    let bridge = null;
-    for (const proj of Object.values(projectBridges)) {
-      if (proj.bridges && proj.bridges[agentId]) {
-        bridge = proj.bridges[agentId];
-        break;
-      }
-    }
+    // Extract bridge info from health endpoint, scoped to selected project
+    const projectHealth = (healthData.projects || {})[state.selectedProjectId] || {};
+    const bridge = (projectHealth.bridges || {})[agentId] || null;
 
     const bStatus = bridge ? bridge.status : (metrics.bridgeStatus || 'unknown');
     const bColor = bridgeStatusColor(bStatus === 'connected' ? 'ready' : bStatus);
