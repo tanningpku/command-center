@@ -2302,10 +2302,13 @@ export class Gateway {
       const sender = fields["sender"] ?? req.headers["x-user-id"] as string | undefined ?? "user";
       const caption = fields["caption"] || "";
       const pathsForContent = imagePaths.length ? imagePaths : savedPaths;
+      // Detect agent sender type (same logic as handleSendMessage)
+      const agentStore = this.agentStores.get(projectId);
+      const isAgent = sender === "captain" || (agentStore?.get(sender) != null);
       this.dispatchMessage({
         projectId,
         threadId,
-        sender: { id: sender, type: "user" },
+        sender: { id: sender, type: isAgent ? "assistant" : "user" },
         channel: "thread",
         mode: "text",
         content: caption || `[image: ${pathsForContent.join(", ")}]`,
