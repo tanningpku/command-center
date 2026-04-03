@@ -223,17 +223,29 @@ case "${1:-help}" in
     case "${2:-}" in
       send)
         shift 2
-        THREAD="" TEXT=""
+        THREAD="" TEXT="" IMAGE=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
             --thread) THREAD="$2"; shift 2;;
             --text) TEXT="$2"; shift 2;;
+            --image) IMAGE="$2"; shift 2;;
             *) shift;;
           esac
         done
         [ -z "$THREAD" ] && echo "Error: --thread is required" && exit 2
-        [ -z "$TEXT" ] && echo "Error: --text is required" && exit 2
-        json_post "/api/message" "{\"thread_id\":\"$THREAD\",\"text\":\"$TEXT\",\"sender\":\"$AGENT\",\"source\":\"cli\"}"
+        if [ -n "$IMAGE" ]; then
+          [ ! -f "$IMAGE" ] && echo "Error: image file not found: $IMAGE" && exit 2
+          CURL_ARGS=(-s -X POST "$BASE_URL/api/message/image?threadId=$THREAD"
+            -H "X-Project-Id: $PROJECT" -H "X-Agent-Id: $AGENT"
+            -F "image=@$IMAGE"
+            -F "sender=$AGENT"
+            -F "source=cli")
+          [ -n "$TEXT" ] && CURL_ARGS+=(-F "caption=$TEXT")
+          curl "${CURL_ARGS[@]}"
+        else
+          [ -z "$TEXT" ] && echo "Error: --text is required (or use --image)" && exit 2
+          json_post "/api/message" "{\"thread_id\":\"$THREAD\",\"text\":\"$TEXT\",\"sender\":\"$AGENT\",\"source\":\"cli\"}"
+        fi
         ;;
       history)
         shift 2
@@ -853,7 +865,7 @@ for b in bridges:
     echo "Threads & Messages:"
     echo "  thread list   [limit]"
     echo "  thread create --name <n> [--participants <p1,p2>]"
-    echo "  msg send      --thread <id> --text <t>"
+    echo "  msg send      --thread <id> --text <t> [--image <path>]"
     echo "  msg history   --thread <id> [--limit <n>]"
     echo ""
     echo "Project Management:"
