@@ -708,7 +708,6 @@ export class ClaudeBridge extends EventEmitter {
           `${Math.round(sinceResponse / 1000)}s (${this.pendingMessages} pending, ` +
           `${this._messagesReceived} received, ${this._messagesSent} sent). Killing subprocess.`,
         );
-        this.lastUserMessageAt = 0;
         this.emit("zombie_kill", {
           agentId: this.opts.agentId ?? "captain",
           sinceResponseMs: sinceResponse,
@@ -716,6 +715,10 @@ export class ClaudeBridge extends EventEmitter {
           messagesReceived: this._messagesReceived,
           messagesSent: this._messagesSent,
         });
+        // Kill the child first — bridge is still isReady() because the socket is open,
+        // so scheduleAutoRestart would cancel during backoff. killChild() tears down
+        // the socket and resets state, ensuring the restart actually happens.
+        this.killChild();
         this.scheduleAutoRestart("watchdog_zombie");
         return;
       }
