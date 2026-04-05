@@ -549,14 +549,15 @@ export class Gateway {
       if (p.participantId === msg.sender.id) continue;
 
       const bridge = await this.ensureBridge(msg.projectId, p.participantId);
-      if (!bridge?.isReady()) {
+      if (!bridge) {
         console.warn(
-          `[gateway] Message dropped: bridge not ready for ${msg.projectId}/${p.participantId} ` +
+          `[gateway] No bridge for ${msg.projectId}/${p.participantId} ` +
           `(thread: ${msg.threadId}, sender: ${msg.sender.id}, kind: ${msg.kind ?? "message"}, source: ${msg.source ?? "unknown"})`,
         );
         continue;
       }
 
+      // Bridge queues the message internally if not yet ready — no message drops
       bridge.sendUserMessage(formatted, msg.threadId, msg.sender.id);
     }
   }
