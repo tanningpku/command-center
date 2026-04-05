@@ -214,6 +214,9 @@ export class ClaudeBridge extends EventEmitter {
   private backoffMs = 1_000;
   private static readonly MAX_BACKOFF_MS = 60_000;
 
+  /* ---- Message queue (delivers when bridge becomes ready) ---- */
+  private messageQueue: Array<{ text: string; threadId: string; sender?: string; context?: string }> = [];
+
   /* ---- Watchdog state ---- */
   /** Timestamp of most recent activity (SDK message, stdout, stderr) */
   private lastActivityAt = Date.now();
@@ -274,6 +277,7 @@ export class ClaudeBridge extends EventEmitter {
     pid: number | null;
     messages_received: number;
     messages_sent: number;
+    queued_messages: number;
     errors: number;
   } {
     const now = Date.now();
@@ -300,6 +304,7 @@ export class ClaudeBridge extends EventEmitter {
       pid: this.child?.pid ?? null,
       messages_received: this._messagesReceived,
       messages_sent: this._messagesSent,
+      queued_messages: this.messageQueue.length,
       errors: this._errors,
     };
   }
@@ -321,6 +326,7 @@ export class ClaudeBridge extends EventEmitter {
 
     if (this.opts.mockClaude) {
       console.log(`[${this.tag}] MOCK mode — no subprocess`);
+      this._ready = true;
       return;
     }
     this.spawnChild();
@@ -384,14 +390,32 @@ export class ClaudeBridge extends EventEmitter {
     this._ready = false;
     this.wss?.close();
     this.wss = null;
+    if (this.messageQueue.length > 0) {
+      console.warn(`[${this.tag}] Dropping ${this.messageQueue.length} queued message(s) on stop`);
+      this.messageQueue.length = 0;
+    }
   }
 
   isReady(): boolean {
+    if (this.opts.mockClaude) return this._ready;
     return this._ready && this.activeSocket !== null && this.activeSocket.readyState === WebSocket.OPEN;
   }
 
-  /** Send a user message to Claude, with thread context, history, and timestamp. */
+  /** Send a user message to Claude, with thread context, history, and timestamp.
+   *  If the bridge is not ready, the message is queued and delivered when ready. */
   sendUserMessage(text: string, threadId: string, sender?: string, context?: string): void {
+    if (!this.isReady()) {
+      this.messageQueue.push({ text, threadId, sender, context });
+      console.log(
+        `[${this.tag}] Queued message (bridge not ready, queue depth: ${this.messageQueue.length})`,
+      );
+      return;
+    }
+    this.deliverMessage(text, threadId, sender, context);
+  }
+
+  /** Actually send a message to the bridge (must be ready). */
+  private deliverMessage(text: string, threadId: string, sender?: string, context?: string): void {
     this.activeThreadId = threadId;
     const now = new Date();
     const local = now.toLocaleString("en-US", {
@@ -411,6 +435,16 @@ export class ClaudeBridge extends EventEmitter {
     const ts = Date.now();
     this.lastUserMessageAt = ts;
     this.lastActivityAt = ts; // Reset so watchdog gives a full timeout window
+  }
+
+  /** Drain queued messages after bridge becomes ready. */
+  private drainQueue(): void {
+    if (this.messageQueue.length === 0) return;
+    console.log(`[${this.tag}] Draining ${this.messageQueue.length} queued message(s)`);
+    // Deliver the first message — Claude processes one turn at a time.
+    // Remaining messages stay queued and will be delivered after each result.
+    const msg = this.messageQueue.shift()!;
+    this.deliverMessage(msg.text, msg.threadId, msg.sender, msg.context);
   }
 
   /* ---- Child process management ---- */
@@ -568,7 +602,12 @@ export class ClaudeBridge extends EventEmitter {
       this.send(buildInitializeRequest(this.opts.systemPrompt));
     } else {
       // WebSocket reconnect — CLI already initialized, just swap socket
+      this._ready = true;
       console.log(`[${this.tag}] Claude reconnected (socket swap)`);
+      // Only drain queue if no turn is currently in progress — avoid overlapping turns
+      if (this.lastUserMessageAt === 0) {
+        this.drainQueue();
+      }
     }
   }
 
@@ -595,6 +634,7 @@ export class ClaudeBridge extends EventEmitter {
           this.hasInitialized = true;
           this.emit("ready");
           console.log(`[${this.tag}] Claude ready`);
+          this.drainQueue();
         }
       }
       return;
@@ -624,6 +664,8 @@ export class ClaudeBridge extends EventEmitter {
         resultText: String(message.result ?? ""),
         raw: message,
       } satisfies ResultPayload);
+      // Drain next queued message now that this turn is done
+      this.drainQueue();
       return;
     }
 
