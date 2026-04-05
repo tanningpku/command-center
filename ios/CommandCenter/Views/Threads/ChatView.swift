@@ -328,7 +328,8 @@ struct ChatView: View {
                     if draftImageData != nil {
                         // Photo draft is attached — route through sendMessage()
                         // which handles image upload with caption
-                        inputText = text
+                        let existing = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        inputText = existing.isEmpty ? text : "\(existing) \(text)"
                         sendMessage()
                     } else {
                         await threadStore.sendMessage(text: text, threadId: threadId, source: "ios-voice")
