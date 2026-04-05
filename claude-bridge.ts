@@ -316,6 +316,7 @@ export class ClaudeBridge extends EventEmitter {
 
     if (this.opts.mockClaude) {
       console.log(`[${this.tag}] MOCK mode — no subprocess`);
+      this._ready = true;
       return;
     }
     this.spawnChild();
@@ -583,7 +584,9 @@ export class ClaudeBridge extends EventEmitter {
       this.send(buildInitializeRequest(this.opts.systemPrompt));
     } else {
       // WebSocket reconnect — CLI already initialized, just swap socket
+      this._ready = true;
       console.log(`[${this.tag}] Claude reconnected (socket swap)`);
+      this.drainQueue();
     }
   }
 
