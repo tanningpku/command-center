@@ -219,6 +219,10 @@ export class ClaudeBridge extends EventEmitter {
   private lastActivityAt = Date.now();
   /** Timestamp of most recent user message sent to bridge */
   private lastUserMessageAt = 0;
+  /** Timestamp of most recent response from Claude (assistant text or result) */
+  private lastResponseAt = 0;
+  /** Number of user messages sent that haven't received a result yet */
+  private pendingMessages = 0;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   /** Timeout in ms with no activity after sending a message before considering stuck (default: 5min) */
   static readonly STUCK_TIMEOUT_MS = 300_000;
@@ -259,6 +263,8 @@ export class ClaudeBridge extends EventEmitter {
     uptime_seconds: number;
     started_at: string | null;
     last_activity_at: string;
+    last_response_at: string | null;
+    pending_messages: number;
     restart_count: number;
     last_restart_reason: string | null;
     ws_port: number;
@@ -283,6 +289,8 @@ export class ClaudeBridge extends EventEmitter {
       uptime_seconds: this.bridgeStartedAt > 0 ? Math.floor((now - this.bridgeStartedAt) / 1000) : 0,
       started_at: this.bridgeStartedAt > 0 ? new Date(this.bridgeStartedAt).toISOString() : null,
       last_activity_at: new Date(this.lastActivityAt).toISOString(),
+      last_response_at: this.lastResponseAt > 0 ? new Date(this.lastResponseAt).toISOString() : null,
+      pending_messages: this.pendingMessages,
       restart_count: this._restartCount,
       last_restart_reason: this._lastRestartReason,
       ws_port: this.opts.wsPort,
@@ -393,6 +401,7 @@ export class ClaudeBridge extends EventEmitter {
     parts.push(`${sender ?? "User"}: ${text}`);
     this.send(buildUserMessage(parts.join("\n")));
     this._messagesSent++;
+    this.pendingMessages++;
     const ts = Date.now();
     this.lastUserMessageAt = ts;
     this.lastActivityAt = ts; // Reset so watchdog gives a full timeout window
@@ -499,6 +508,7 @@ export class ClaudeBridge extends EventEmitter {
     // Reset watchdog state — interrupted turn is no longer in-flight
     this.lastUserMessageAt = 0;
     this.lastActivityAt = Date.now();
+    this.pendingMessages = 0;
     if (this.child) {
       this.child.removeAllListeners("exit");
       this.child.kill();
@@ -596,6 +606,8 @@ export class ClaudeBridge extends EventEmitter {
     // Result — turn complete
     if (type === "result") {
       this.lastUserMessageAt = 0; // Turn done — stop watchdog monitoring
+      this.lastResponseAt = Date.now();
+      if (this.pendingMessages > 0) this.pendingMessages--;
       this.emit("result", {
         sessionId: String(message.session_id ?? ""),
         totalCostUsd: Number(message.total_cost_usd ?? 0),
@@ -608,6 +620,7 @@ export class ClaudeBridge extends EventEmitter {
 
     // Assistant response
     if (type === "assistant") {
+      this.lastResponseAt = Date.now();
       const uuid = String(message.uuid ?? "");
       if (uuid && this.seenUuids.has(uuid)) return;
       if (uuid) this.seenUuids.add(uuid);
@@ -671,7 +684,33 @@ export class ClaudeBridge extends EventEmitter {
     if (this.lastUserMessageAt === 0) return;
     if (!this.child) return;
 
-    // Not stuck if there's been recent activity (SDK messages, stdout, stderr)
+    // Zombie detection: bridge is receiving SDK messages (lastActivityAt keeps resetting)
+    // but hasn't sent a response (assistant text or result) in STUCK_TIMEOUT_MS.
+    // This catches bridges hung on an API call — alive but unresponsive.
+    if (this.pendingMessages > 0 && sinceActivity < ClaudeBridge.STUCK_TIMEOUT_MS) {
+      const sinceResponse = this.lastResponseAt > 0
+        ? now - this.lastResponseAt
+        : now - this.lastUserMessageAt; // Never responded — measure from when we sent
+      if (sinceResponse >= ClaudeBridge.STUCK_TIMEOUT_MS) {
+        console.warn(
+          `[${this.tag}] WATCHDOG: Bridge zombie — receiving messages but no response for ` +
+          `${Math.round(sinceResponse / 1000)}s (${this.pendingMessages} pending, ` +
+          `${this._messagesReceived} received, ${this._messagesSent} sent). Killing subprocess.`,
+        );
+        this.lastUserMessageAt = 0;
+        this.emit("zombie_kill", {
+          agentId: this.opts.agentId ?? "captain",
+          sinceResponseMs: sinceResponse,
+          pendingMessages: this.pendingMessages,
+          messagesReceived: this._messagesReceived,
+          messagesSent: this._messagesSent,
+        });
+        this.scheduleAutoRestart("watchdog_zombie");
+        return;
+      }
+    }
+
+    // Classic stuck detection: no activity at all (SDK, stdout, stderr)
     if (sinceActivity < ClaudeBridge.STUCK_TIMEOUT_MS) return;
 
     console.warn(
