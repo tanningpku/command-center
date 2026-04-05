@@ -217,6 +217,8 @@ export class ClaudeBridge extends EventEmitter {
   /* ---- Watchdog state ---- */
   /** Timestamp of most recent activity (SDK message, stdout, stderr) */
   private lastActivityAt = Date.now();
+  /** Timestamp of most recent SDK protocol message (WebSocket onMessage) — excludes stdout/stderr */
+  private lastSdkMessageAt = 0;
   /** Timestamp of most recent user message sent to bridge */
   private lastUserMessageAt = 0;
   /** Timestamp of most recent response from Claude (assistant text or result) */
@@ -512,6 +514,7 @@ export class ClaudeBridge extends EventEmitter {
     // Reset watchdog state — interrupted turn is no longer in-flight
     this.lastUserMessageAt = 0;
     this.lastActivityAt = Date.now();
+    this.lastSdkMessageAt = 0;
     this.pendingMessages = 0;
     if (this.child) {
       this.child.removeAllListeners("exit");
@@ -573,7 +576,9 @@ export class ClaudeBridge extends EventEmitter {
     const type = String(message.type ?? "unknown");
 
     // Track activity for watchdog
-    this.lastActivityAt = Date.now();
+    const now = Date.now();
+    this.lastActivityAt = now;
+    this.lastSdkMessageAt = now;
     this._messagesReceived++;
 
     // Forward all raw messages as SSE events
@@ -609,9 +614,9 @@ export class ClaudeBridge extends EventEmitter {
 
     // Result — turn complete
     if (type === "result") {
-      this.lastUserMessageAt = 0; // Turn done — stop watchdog monitoring
       this.lastResponseAt = Date.now();
       if (this.pendingMessages > 0) this.pendingMessages--;
+      if (this.pendingMessages === 0) this.lastUserMessageAt = 0; // All turns done — stop watchdog monitoring
       this.emit("result", {
         sessionId: String(message.session_id ?? ""),
         totalCostUsd: Number(message.total_cost_usd ?? 0),
@@ -688,10 +693,12 @@ export class ClaudeBridge extends EventEmitter {
     if (this.lastUserMessageAt === 0) return;
     if (!this.child) return;
 
-    // Zombie detection: bridge is receiving SDK messages (lastActivityAt keeps resetting)
-    // but hasn't sent a response (assistant text or result) in STUCK_TIMEOUT_MS.
-    // This catches bridges hung on an API call — alive but unresponsive.
-    if (this.pendingMessages > 0 && sinceActivity < ClaudeBridge.STUCK_TIMEOUT_MS) {
+    // Zombie detection: bridge is receiving SDK protocol messages (lastSdkMessageAt keeps resetting)
+    // but hasn't produced a response (assistant text or result) in STUCK_TIMEOUT_MS.
+    // This catches bridges hung on an API call — alive at protocol level but unresponsive.
+    // Uses SDK message timestamps (not stdout/stderr) to avoid killing long-running tools.
+    const sinceSdkMessage = this.lastSdkMessageAt > 0 ? now - this.lastSdkMessageAt : Infinity;
+    if (this.pendingMessages > 0 && sinceSdkMessage < ClaudeBridge.STUCK_TIMEOUT_MS) {
       const sinceResponse = this.lastResponseAt > 0
         ? now - this.lastResponseAt
         : now - this.lastUserMessageAt; // Never responded — measure from when we sent
