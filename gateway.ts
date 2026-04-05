@@ -378,6 +378,20 @@ export class Gateway {
       this.postHealthAlert(projectId, `⚠️ Bridge **${agentId}** appears stuck — no activity for ${Math.round(info.sinceActivityMs / 1000)}s. Auto-restarting.`);
     });
 
+    bridge.on("zombie_kill", (info: { agentId: string; sinceResponseMs: number; pendingMessages: number; messagesReceived: number; messagesSent: number }) => {
+      console.warn(`[gateway] Zombie bridge detected for ${projectId}/${info.agentId} (no response for ${Math.round(info.sinceResponseMs / 1000)}s, ${info.pendingMessages} pending)`);
+      this.sseHub.publish(projectId, "bridge_zombie_kill", {
+        agentId: info.agentId,
+        sinceResponseMs: info.sinceResponseMs,
+        pendingMessages: info.pendingMessages,
+        messagesReceived: info.messagesReceived,
+        messagesSent: info.messagesSent,
+        timestamp: new Date().toISOString(),
+      });
+      this.sseHub.publish(projectId, "bridge_status_changed", { agentId: info.agentId, status: "stuck", previousStatus: "ready" });
+      this.postHealthAlert(projectId, `🧟 Bridge **${agentId}** is a zombie — receiving messages but no response for ${Math.round(info.sinceResponseMs / 1000)}s (${info.pendingMessages} pending). Auto-restarting.`);
+    });
+
     bridge.on("idle_restart", (info: { agentId: string; sinceActivityMs: number }) => {
       console.warn(`[gateway] Idle restart for ${projectId}/${info.agentId} (not ready, no activity for ${Math.round(info.sinceActivityMs / 1000)}s)`);
       this.sseHub.publish(projectId, "bridge_idle_restart", {
