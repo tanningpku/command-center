@@ -325,9 +325,16 @@ struct ChatView: View {
                 let result = try await api.transcribeAudio(fileURL: url)
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
-                    await threadStore.sendMessage(text: text, threadId: threadId, source: "ios-voice")
-                    if let proxy = scrollProxy { scrollToBottom(proxy: proxy) }
-                    HapticManager.success()
+                    if draftImageData != nil {
+                        // Photo draft is attached — route through sendMessage()
+                        // which handles image upload with caption
+                        inputText = text
+                        sendMessage()
+                    } else {
+                        await threadStore.sendMessage(text: text, threadId: threadId, source: "ios-voice")
+                        if let proxy = scrollProxy { scrollToBottom(proxy: proxy) }
+                        HapticManager.success()
+                    }
                 }
             } catch {
                 speechService.error = "Transcription failed: \(error.localizedDescription)"
