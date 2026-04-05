@@ -405,6 +405,7 @@ export class ClaudeBridge extends EventEmitter {
     const ts = Date.now();
     this.lastUserMessageAt = ts;
     this.lastActivityAt = ts; // Reset so watchdog gives a full timeout window
+    this.lastResponseAt = 0; // Reset so zombie timer measures from this turn, not the previous one
   }
 
   /* ---- Child process management ---- */
