@@ -401,11 +401,14 @@ export class ClaudeBridge extends EventEmitter {
     parts.push(`${sender ?? "User"}: ${text}`);
     this.send(buildUserMessage(parts.join("\n")));
     this._messagesSent++;
+    // Only reset zombie timer when starting a fresh turn, not when queueing behind an in-flight turn
+    if (this.pendingMessages === 0) {
+      this.lastResponseAt = 0; // Reset so zombie timer measures from this turn, not a previous one
+    }
     this.pendingMessages++;
     const ts = Date.now();
     this.lastUserMessageAt = ts;
     this.lastActivityAt = ts; // Reset so watchdog gives a full timeout window
-    this.lastResponseAt = 0; // Reset so zombie timer measures from this turn, not the previous one
   }
 
   /* ---- Child process management ---- */
@@ -621,10 +624,10 @@ export class ClaudeBridge extends EventEmitter {
 
     // Assistant response
     if (type === "assistant") {
-      this.lastResponseAt = Date.now();
       const uuid = String(message.uuid ?? "");
-      if (uuid && this.seenUuids.has(uuid)) return;
+      if (uuid && this.seenUuids.has(uuid)) return; // Skip replays before updating response time
       if (uuid) this.seenUuids.add(uuid);
+      this.lastResponseAt = Date.now();
 
       const fullText = extractAssistantText(message);
       if (fullText) {
