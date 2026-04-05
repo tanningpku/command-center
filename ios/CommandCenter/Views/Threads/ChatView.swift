@@ -325,7 +325,7 @@ struct ChatView: View {
                 let result = try await api.transcribeAudio(fileURL: url)
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
-                    if draftImageData != nil {
+                    if draftImageData != nil, apiService != nil {
                         // Photo draft is attached — route through sendMessage()
                         // which handles image upload with caption
                         let existing = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
