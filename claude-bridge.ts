@@ -387,6 +387,7 @@ export class ClaudeBridge extends EventEmitter {
   }
 
   isReady(): boolean {
+    if (this.opts.mockClaude) return this._ready;
     return this._ready && this.activeSocket !== null && this.activeSocket.readyState === WebSocket.OPEN;
   }
 
@@ -586,7 +587,10 @@ export class ClaudeBridge extends EventEmitter {
       // WebSocket reconnect — CLI already initialized, just swap socket
       this._ready = true;
       console.log(`[${this.tag}] Claude reconnected (socket swap)`);
-      this.drainQueue();
+      // Only drain queue if no turn is currently in progress — avoid overlapping turns
+      if (this.lastUserMessageAt === 0) {
+        this.drainQueue();
+      }
     }
   }
 
