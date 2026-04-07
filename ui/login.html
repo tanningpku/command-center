@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Command Center — Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 40px 36px 36px;
+      width: 360px;
+      max-width: 90vw;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+      text-align: center;
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 28px;
+      letter-spacing: -0.02em;
+    }
+    form { display: flex; flex-direction: column; gap: 12px; }
+    input {
+      text-align: center;
+      font-size: 14px;
+      padding: 10px 14px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    input:focus { border-color: #58a6ff; }
+    input::placeholder { color: #6e7681; }
+    button {
+      margin-top: 4px;
+      padding: 10px 16px;
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    button:hover { background: #2ea043; }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .error {
+      color: #f85149;
+      font-size: 13px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">Command Center</div>
+    <form id="loginForm">
+      <input id="pw" type="password" placeholder="Password" required autofocus />
+      <div id="err" class="error"></div>
+      <button type="submit" id="btn">Sign In</button>
+    </form>
+  </div>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById('pw');
+      const err = document.getElementById('err');
+      const btn = document.getElementById('btn');
+      err.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw.value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Invalid password');
+        // Cookie is set by the server (httpOnly). Redirect to dashboard.
+        window.location.href = '/';
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.style.display = 'block';
+        pw.select();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -763,11 +763,8 @@ export class Gateway {
         return;
       }
 
-      // --- Auth gate: all other /api/* routes require authentication ---
-      if (pathname.startsWith("/api/") && !this.isAuthenticated(req)) {
-        this.sendJson(res, 401, { error: "Authentication required" });
-        return;
-      }
+      // --- API endpoints are OPEN (no auth) so iOS app keeps working ---
+      // Auth is only enforced on static UI files (below)
 
       // --- Registry endpoints ---
       if (method === "GET" && pathname === "/api/registry") {
@@ -1007,7 +1004,13 @@ export class Gateway {
         return;
       }
 
-      // --- Static file serving ---
+      // --- Static file serving (auth-gated) ---
+      if (this.authEnabled && !this.isAuthenticated(req)) {
+        // Serve login page for unauthenticated UI requests
+        const loginPath = path.join(this.uiDir, "login.html");
+        this.streamFile(loginPath, res);
+        return;
+      }
       this.serveStatic(pathname, res);
     } catch (err) {
       this.trackError();

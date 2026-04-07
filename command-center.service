@@ -1,0 +1,17 @@
+[Unit]
+Description=Command Center Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=ning
+WorkingDirectory=/home/ning/code/command-center
+ExecStart=/home/ning/.nvm/versions/node/v22.17.0/bin/node dist/index.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=CC_PORT=3300
+Environment=CC_PASSWORD=commandcenter2026
+
+[Install]
+WantedBy=multi-user.target
