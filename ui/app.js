@@ -1937,7 +1937,7 @@ function updateOrAppendStreamingMessage(msg) {
     const noMsgs = chatMessages.querySelector('.cc-chat-no-messages');
     if (noMsgs) noMsgs.remove();
 
-    const senderName = msg.sender?.id || msg.sender || 'Captain';
+    const senderName = (typeof msg.sender === 'string' ? msg.sender : msg.sender?.id) || 'Captain';
     const text = msg.text || msg.fullText || msg.content || '';
     const bubbleHtml = `
       <div class="cc-message cc-message-assistant cc-message-streaming">
@@ -2154,7 +2154,7 @@ function handleSSEEvent(event) {
       const msgThreadId = msg.threadId || msg.thread_id;
       if (msgThreadId && msgThreadId === state.activeThreadId && state.activeTab === 'threads') {
         const senderType = msg.sender?.type || (msg.role === 'assistant' ? 'assistant' : 'user');
-        const senderId = msg.sender?.id || msg.senderName || '';
+        const senderId = (typeof msg.sender === 'string' ? msg.sender : msg.sender?.id) || msg.senderName || '';
         // Don't duplicate user messages we optimistically appended from this UI
         if (senderType === 'user' && msg.source === 'webui') break;
         appendChatMessage({
