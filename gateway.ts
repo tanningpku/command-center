@@ -552,6 +552,14 @@ export class Gateway {
 
   /** Forward a message to all participant bridges except the sender's. */
   private async fanOutToBridges(msg: ChannelMessage): Promise<void> {
+    // System health alerts (bridge recovery/zombie/idle/escalation) are
+    // informational — they should appear in the UI via SSE but must NOT be
+    // sent to bridges. Otherwise bridges receive their own recovery alerts as
+    // pending messages, which triggers the zombie watchdog again (infinite loop).
+    // Note: we guard on "health-alert" specifically, NOT "gateway" — other
+    // gateway-sourced system messages (e.g., task creation) must still fan out.
+    if (msg.kind === "system" && msg.source === "health-alert") return;
+
     const threadStore = this.threadStores.get(msg.projectId);
     if (!threadStore) return;
 
@@ -1215,7 +1223,9 @@ export class Gateway {
     }
   }
 
-  /** Post a health-related system message to the project's main thread. */
+  /** Post a health-related system message to the project's main thread.
+   *  Uses source "health-alert" so fanOutToBridges() skips these —
+   *  they are informational for the UI, not actionable by agents. */
   private postHealthAlert(projectId: string, content: string): void {
     this.dispatchMessage({
       projectId,
@@ -1225,7 +1235,7 @@ export class Gateway {
       mode: "text",
       content,
       kind: "system",
-      source: "gateway",
+      source: "health-alert",
     });
   }
 
