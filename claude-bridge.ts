@@ -271,6 +271,7 @@ export class ClaudeBridge extends EventEmitter {
     started_at: string | null;
     last_activity_at: string;
     last_response_at: string | null;
+    last_tool_activity_at: string | null;
     pending_messages: number;
     restart_count: number;
     last_restart_reason: string | null;
