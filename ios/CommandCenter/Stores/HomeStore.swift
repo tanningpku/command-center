@@ -44,23 +44,19 @@ class HomeStore {
         isLoading = false
     }
 
-    private func loadFallback() async {
-        do {
-            async let tasksReq = api.fetchTasks()
-            async let agentsReq = api.fetchAgents()
-            async let threadsReq = api.fetchThreads()
+    private func loadFallback() async throws {
+        async let tasksReq = api.fetchTasks()
+        async let agentsReq = api.fetchAgents()
+        async let threadsReq = api.fetchThreads()
 
-            let (tasksResp, agentsResp, threadsResp) = try await (tasksReq, agentsReq, threadsReq)
+        let (tasksResp, agentsResp, threadsResp) = try await (tasksReq, agentsReq, threadsReq)
 
-            blocks = buildBlocks(
-                tasks: tasksResp.tasks,
-                agents: agentsResp.agents,
-                threads: threadsResp.threads
-            )
-            updatedAt = ISO8601DateFormatter().string(from: Date())
-        } catch {
-            throw error
-        }
+        blocks = buildBlocks(
+            tasks: tasksResp.tasks,
+            agents: agentsResp.agents,
+            threads: threadsResp.threads
+        )
+        updatedAt = ISO8601DateFormatter().string(from: Date())
     }
 
     // MARK: - Fallback block composition
