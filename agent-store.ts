@@ -21,10 +21,12 @@ export interface Agent {
 export class AgentStore {
   private db: DatabaseSync;
   private dataDir: string;
+  private projectId: string;
 
   constructor(dbPath: string) {
     this.db = new DatabaseSync(dbPath);
     this.dataDir = path.dirname(dbPath);
+    this.projectId = path.basename(dbPath).replace(/-agents\.db$/, "");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
@@ -82,11 +84,11 @@ export class AgentStore {
   }
 
   getKBDir(agentId: string): string {
-    return path.join(this.dataDir, "agents", agentId, "kb");
+    return path.join(this.dataDir, "agents", this.projectId, agentId, "kb");
   }
 
   getDesignsDir(agentId: string): string {
-    return path.join(this.dataDir, "agents", agentId, "designs");
+    return path.join(this.dataDir, "agents", this.projectId, agentId, "designs");
   }
 
   private scaffoldKB(agentId: string, name: string, role: string, isCaptain: boolean): void {
