@@ -114,14 +114,16 @@ class DocsStore {
             let agents = agentResponse.agents.filter { $0.status != "archived" }
 
             var allDocs: [DocItem] = []
-            var hadPartialFailure = false
+            var hadSpecFailure = false
 
-            await withTaskGroup(of: (Bool, [DocItem]).self) { group in
+            // Tag task group results to distinguish spec vs design failures
+            enum FetchKind { case spec, design }
+            await withTaskGroup(of: (FetchKind, Bool, [DocItem]).self) { group in
                 for agent in agents {
                     // Fetch KB files (specs)
                     group.addTask { [api] in
                         guard let kbResponse = try? await api.fetchKBList(agentId: agent.id) else {
-                            return (false, [])
+                            return (.spec, false, [])
                         }
                         let items = kbResponse.files
                             .filter { !Self.excludedFiles.contains($0) }
@@ -136,13 +138,13 @@ class DocsStore {
                                     modified: nil
                                 )
                             }
-                        return (true, items)
+                        return (.spec, true, items)
                     }
 
-                    // Fetch design mockups
+                    // Fetch design mockups (silently fail if endpoint not available)
                     group.addTask { [api] in
                         guard let designResponse = try? await api.fetchDesignsList(agentId: agent.id) else {
-                            return (false, [])
+                            return (.design, false, [])
                         }
                         let items = designResponse.files.map { file in
                             DocItem(
@@ -155,11 +157,11 @@ class DocsStore {
                                 modified: file.modified
                             )
                         }
-                        return (true, items)
+                        return (.design, true, items)
                     }
                 }
-                for await (succeeded, items) in group {
-                    if !succeeded { hadPartialFailure = true }
+                for await (kind, succeeded, items) in group {
+                    if kind == .spec && !succeeded { hadSpecFailure = true }
                     allDocs.append(contentsOf: items)
                 }
             }
@@ -168,11 +170,12 @@ class DocsStore {
 
             docs = allDocs.sorted { $0.displayTitle < $1.displayTitle }
 
-            if hadPartialFailure {
+            // Only show partial failure for specs; design endpoint may not exist yet
+            if hadSpecFailure {
                 self.error = "Some agents' docs could not be loaded"
             }
 
-            if !hadPartialFailure, let projectId = snapshotProjectId {
+            if !hadSpecFailure, let projectId = snapshotProjectId {
                 CacheManager.save(docs.map {
                     CachedDocItem(id: $0.id, fileName: $0.fileName, agentId: $0.agentId,
                                   agentName: $0.agentName, type: $0.type,
@@ -222,6 +225,7 @@ class DocsStore {
 }
 
 /// Codable wrapper for caching DocItem.
+/// New fields default to spec/.nil for backward compatibility with pre-designs caches.
 private struct CachedDocItem: Codable {
     let id: String
     let fileName: String
@@ -230,4 +234,22 @@ private struct CachedDocItem: Codable {
     let type: DocType
     let size: Int?
     let modified: String?
+
+    init(id: String, fileName: String, agentId: String, agentName: String,
+         type: DocType, size: Int?, modified: String?) {
+        self.id = id; self.fileName = fileName; self.agentId = agentId
+        self.agentName = agentName; self.type = type; self.size = size
+        self.modified = modified
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        fileName = try c.decode(String.self, forKey: .fileName)
+        agentId = try c.decode(String.self, forKey: .agentId)
+        agentName = try c.decode(String.self, forKey: .agentName)
+        type = (try? c.decode(DocType.self, forKey: .type)) ?? .spec
+        size = try? c.decode(Int.self, forKey: .size)
+        modified = try? c.decode(String.self, forKey: .modified)
+    }
 }
