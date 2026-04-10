@@ -69,14 +69,14 @@ struct DocDetailView: View {
     }
 }
 
-/// WKWebView wrapper that renders HTML design mockups with JavaScript disabled.
+/// WKWebView wrapper that renders HTML design mockups with full JavaScript support.
 struct DesignWebView: UIViewRepresentable {
     let htmlContent: String
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let prefs = WKWebpagePreferences()
-        prefs.allowsContentJavaScript = false
+        prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
 
         let webView = WKWebView(frame: .zero, configuration: config)
