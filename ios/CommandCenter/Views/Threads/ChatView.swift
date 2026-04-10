@@ -54,11 +54,6 @@ struct ChatView: View {
                         }
                     }
                 }
-                .overlay(alignment: .bottom) {
-                    CaptainBarView()
-                        .padding(.bottom, 8)
-                }
-
                 Divider()
 
                 // Draft image preview
@@ -134,10 +129,6 @@ struct ChatView: View {
             try? await Task.sleep(for: .milliseconds(100))
             if let proxy = scrollProxy {
                 scrollToBottom(proxy: proxy)
-            }
-            // Brief captain bar pulse — confirms overlay is visible & SSE is wired up
-            if threadStore.captainThought == nil {
-                threadStore.captainThought = CaptainThought(agentName: "Captain", text: "Watching this thread...")
             }
             // Get API service from the base URL
             if let url = AppConfig.baseURL {
