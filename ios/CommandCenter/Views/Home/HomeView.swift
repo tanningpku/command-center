@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Captain-authored dashboard — replaces Ops and Metrics tabs.
-/// Fetches GET /api/dashboard and renders 7 block types:
-/// hero, stats, alert, activity, list, section, agents.
+/// Auto-aggregated project dashboard — fetches tasks, agents, and threads,
+/// then composes dashboard blocks client-side.
 struct HomeView: View {
     @Environment(HomeStore.self) var homeStore
     @Environment(ProjectStore.self) var projectStore
@@ -23,8 +22,8 @@ struct HomeView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 } else if homeStore.blocks.isEmpty {
-                    ContentUnavailableView("No Dashboard", systemImage: "house",
-                        description: Text("The dashboard will appear here once Captain publishes it."))
+                    ContentUnavailableView("No Data", systemImage: "house",
+                        description: Text("No tasks, agents, or threads found for this project."))
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
