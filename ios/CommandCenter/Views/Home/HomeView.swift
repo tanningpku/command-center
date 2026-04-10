@@ -712,7 +712,7 @@ struct WeekStatsBlockView: View {
         (block.items ?? []).compactMap { item in
             guard let obj = item.objectValue,
                   let label = obj["label"]?.stringValue,
-                  let value = obj["value"]?.stringValue else { return nil }
+                  let value = obj["value"]?.displayString else { return nil }
             let color: Color? = {
                 switch obj["color"]?.stringValue {
                 case "green": return .green
@@ -826,7 +826,7 @@ struct StatsBlockView: View {
         (block.items ?? []).compactMap { item in
             guard let obj = item.objectValue,
                   let label = obj["label"]?.stringValue,
-                  let value = obj["value"]?.stringValue else { return nil }
+                  let value = obj["value"]?.displayString else { return nil }
             return (label, value, obj["trend"]?.stringValue)
         }
     }

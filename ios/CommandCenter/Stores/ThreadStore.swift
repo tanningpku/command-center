@@ -163,6 +163,7 @@ class ThreadStore {
                 wasConnected = true
                 if reconnecting {
                     onReconnect?()
+                    NotificationCenter.default.post(name: .dashboardUpdated, object: nil)
                 }
             }
             for await event in stream {
