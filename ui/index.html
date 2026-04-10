@@ -55,6 +55,9 @@
         <button class="cc-nav-tab" data-tab="threads">
           <span class="cc-nav-icon">#</span> Threads
         </button>
+        <button class="cc-nav-tab" data-tab="docs">
+          <span class="cc-nav-icon">D</span> Docs
+        </button>
         <button class="cc-nav-tab" data-tab="health">
           <span class="cc-nav-icon">+</span> Health
         </button>
@@ -149,6 +152,32 @@
         </div>
         <div id="boardColumns" class="cc-board">
           <!-- Kanban columns rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Docs tab -->
+      <div id="tab-docs" class="cc-tab-content" style="display: none">
+        <div class="cc-docs-split">
+          <!-- Left: doc list sidebar -->
+          <div id="docsSidebar" class="cc-docs-sidebar">
+            <div class="cc-docs-sidebar-header">
+              <span class="cc-docs-sidebar-title">Design Docs</span>
+              <span id="docsCount" class="cc-badge cc-badge-sm"></span>
+            </div>
+            <input id="docsSearch" class="cc-docs-search" type="text" placeholder="Filter docs..." autocomplete="off" />
+            <div id="docsList" class="cc-docs-list"></div>
+          </div>
+          <!-- Right: doc reader -->
+          <div id="docsReader" class="cc-docs-reader">
+            <div id="docsEmptyState" class="cc-docs-empty">
+              <p>Select a document to read.</p>
+            </div>
+            <div id="docsReaderHeader" class="cc-docs-reader-header" style="display: none">
+              <span id="docsReaderTitle" class="cc-docs-reader-title"></span>
+              <span id="docsReaderAgent" class="cc-docs-reader-agent"></span>
+            </div>
+            <div id="docsReaderContent" class="cc-docs-reader-content cc-markdown" style="display: none"></div>
+          </div>
         </div>
       </div>
 
