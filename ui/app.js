@@ -562,6 +562,14 @@ function renderShippedBlock(block) {
 
 // ── Team Pulse Block (agent grid) ────────────────────────────────
 
+function normalizePulseStatus(status) {
+  if (!status) return 'offline';
+  if (status === 'active' || status === 'running' || status === 'online') return 'online';
+  if (status === 'idle') return 'idle';
+  if (status === 'error' || status === 'crashed') return 'error';
+  return 'offline';
+}
+
 function renderTeamPulseBlock(block) {
   const agents = block.agents || [];
   let html = `<div class="cc-dash-section-header">Team Pulse</div>`;
@@ -569,7 +577,7 @@ function renderTeamPulseBlock(block) {
   html += `<div class="cc-dash-team-pulse">`;
   html += agents.map(agent => {
     const initial = (agent.name || agent.id || '?').charAt(0).toUpperCase();
-    const dotClass = agent.status || 'offline';
+    const dotClass = normalizePulseStatus(agent.status);
     return `
       <div class="cc-dash-pulse-agent">
         <div class="cc-dash-pulse-avatar">
@@ -660,6 +668,12 @@ function renderLegacyActivityBlock(block) {
   return html;
 }
 
+function listItemStateBadge(st) {
+  if (!st) return '';
+  const cls = { created: 'grey', assigned: 'grey', in_progress: 'blue', in_review: 'yellow', qa: 'yellow', blocked: 'red', done: 'green', cancelled: 'grey' }[st] || 'grey';
+  return `<span class="cc-task-badge cc-task-badge-${escapeHtml(cls)}">${escapeHtml(st.replace(/_/g, ' '))}</span>`;
+}
+
 function renderLegacyListBlock(block) {
   const items = block.items || [];
   let html = '';
@@ -669,6 +683,7 @@ function renderLegacyListBlock(block) {
       <div class="cc-dash-inflight-info">
         <div class="cc-dash-inflight-title">${escapeHtml(item.text || item.title || '')}</div>
       </div>
+      ${item.state ? listItemStateBadge(item.state) : ''}
       ${item.assignee ? `<div class="cc-dash-inflight-agent">${escapeHtml(item.assignee)}</div>` : ''}
     </div>
   `).join('');
