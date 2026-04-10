@@ -22,6 +22,7 @@ import { ClaudeBridge, killStaleClaude, type AssistantTextPayload, type ResultPa
 import { SseHub } from "./sse-hub.js";
 import { KbManager } from "./kb-manager.js";
 import { DesignManager } from "./design-manager.js";
+import { generateDashboardBlocks, computeHealthLevel, type BridgeStatusInfo } from "./dashboard-generator.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -1004,6 +1005,12 @@ export class Gateway {
       }
 
       // --- Dashboard endpoints ---
+      if (pathname === "/api/dashboard/generate" && method === "GET") {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        this.handleDashboardGenerate(res, projectId);
+        return;
+      }
       if (pathname === "/api/dashboard") {
         const projectId = this.resolveProjectId(req, parsed);
         if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
@@ -2648,6 +2655,46 @@ export class Gateway {
     this.sseHub.publish(projectId, "dashboard_update", dashboard);
 
     this.sendJson(res, 200, dashboard);
+  }
+
+  /**
+   * GET /api/dashboard/generate — auto-generate dashboard blocks from live data.
+   * Returns blocks + health level. Captain can use these directly or enrich with
+   * brief/recommendation text before POSTing to /api/dashboard.
+   */
+  private handleDashboardGenerate(res: http.ServerResponse, projectId: string): void {
+    const taskStore = this.taskStores.get(projectId);
+    const agentStore = this.agentStores.get(projectId);
+    const threadStore = this.threadStores.get(projectId);
+
+    if (!taskStore || !agentStore || !threadStore) {
+      this.sendJson(res, 404, { error: `Stores not found for project: ${projectId}` });
+      return;
+    }
+
+    // Collect bridge statuses for all agents in this project
+    const bridgeStatuses: BridgeStatusInfo[] = [];
+    for (const [key, bridge] of this.claudeBridges) {
+      if (key.startsWith(`${projectId}:`)) {
+        const health = bridge.getHealthInfo();
+        bridgeStatuses.push({
+          agent_id: health.agent_id,
+          status: health.status,
+          last_activity_at: health.last_activity_at,
+          last_response_at: health.last_response_at,
+        });
+      }
+    }
+
+    const blocks = generateDashboardBlocks({
+      taskStore, agentStore, threadStore, bridgeStatuses,
+    });
+
+    const healthLevel = computeHealthLevel({
+      taskStore, agentStore, threadStore, bridgeStatuses,
+    });
+
+    this.sendJson(res, 200, { healthLevel, blocks });
   }
 
   private async readBody(req: http.IncomingMessage): Promise<Record<string, any>> {
