@@ -703,7 +703,30 @@ function renderLegacySectionBlock(block) {
 
 function renderLegacyAgentsBlock(block) {
   const agents = block.agents || [];
-  return renderTeamPulseBlock({ agents });
+  const title = block.title || 'Team';
+  let html = `<div class="cc-dash-section-header">${escapeHtml(title)}</div>`;
+
+  html += `<div class="cc-dash-team-pulse">`;
+  html += agents.map(agent => {
+    const initial = (agent.name || agent.id || '?').charAt(0).toUpperCase();
+    const dotClass = normalizePulseStatus(agent.status);
+    return `
+      <div class="cc-dash-pulse-agent">
+        <div class="cc-dash-pulse-avatar">
+          ${escapeHtml(initial)}
+          <div class="cc-dash-pulse-dot cc-dash-pulse-dot-${escapeHtml(dotClass)}"></div>
+        </div>
+        <div class="cc-dash-pulse-info">
+          <div class="cc-dash-pulse-name">${escapeHtml(agent.name || agent.id || '')}</div>
+          ${agent.role ? `<div class="cc-dash-pulse-task">${escapeHtml(agent.role)}</div>` : ''}
+          ${agent.task && agent.task !== agent.role ? `<div class="cc-dash-pulse-task">${escapeHtml(agent.task)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  html += `</div>`;
+
+  return html;
 }
 
 // ── Docs Tab ────────────────────────────────────────────────────
