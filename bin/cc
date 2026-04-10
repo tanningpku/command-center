@@ -491,7 +491,10 @@ case "${1:-help}" in
         BODY=$(jq -nc --argjson b "$BLOCKS" '{blocks: $b}')
         json_post "/api/dashboard" "$BODY"
         ;;
-      *) echo "Usage: cc dashboard <get|set --blocks JSON>"; exit 2;;
+      generate)
+        json_get "/api/dashboard/generate"
+        ;;
+      *) echo "Usage: cc dashboard <get|generate|set --blocks JSON>"; exit 2;;
     esac
     ;;
 
@@ -932,6 +935,7 @@ for b in bridges:
     echo ""
     echo "Dashboard:"
     echo "  dashboard get                   Get current dashboard blocks"
+    echo "  dashboard generate              Auto-generate blocks from live data"
     echo "  dashboard set --blocks <json>   Set dashboard blocks (JSON array)"
     echo ""
     echo "Threads & Messages:"
