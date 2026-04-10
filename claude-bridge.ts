@@ -177,6 +177,8 @@ export interface ClaudeBridgeOptions {
   claudeCommand?: string;
   /** Skip spawning Claude (for testing) */
   mockClaude?: boolean;
+  /** Claude model to use (e.g. "claude-opus-4-6", "claude-sonnet-4-6") */
+  model?: string;
   /** Absolute path to command-center bin/ dir (prepended to PATH so `cc` resolves correctly) */
   ccBinDir?: string;
   /** Initial prompt sent via -p flag (default: "{agentId} online — ready for work") */
@@ -458,9 +460,11 @@ export class ClaudeBridge extends EventEmitter {
     const cmd = this.opts.claudeCommand ?? "claude";
     const agentId = this.opts.agentId ?? "captain";
     const prompt = this.opts.initialPrompt ?? `${agentId} online — ready for work`;
+    const model = this.opts.model ?? process.env.CLAUDE_MODEL;
     const args = [
       "--sdk-url", `ws://localhost:${this.opts.wsPort}/claude`,
       "--dangerously-skip-permissions",
+      ...(model ? ["--model", model] : []),
       "-p", prompt,
     ];
     const childPath = this.opts.ccBinDir
