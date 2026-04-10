@@ -53,15 +53,23 @@ class DocsStore {
         }
     }
 
-    /// Agents grouped for section headers.
-    var agentGroups: [(agentName: String, docs: [DocItem])] {
-        let grouped = Dictionary(grouping: filteredDocs, by: \.agentName)
+    /// Agents grouped for section headers. Groups by agentId to avoid collisions
+    /// when two agents share the same display name.
+    var agentGroups: [(agentId: String, agentName: String, docs: [DocItem])] {
+        let grouped = Dictionary(grouping: filteredDocs, by: \.agentId)
         return grouped
-            .sorted { $0.key < $1.key }
-            .map { (agentName: $0.key, docs: $0.value.sorted { $0.displayTitle < $1.displayTitle }) }
+            .sorted { $0.value.first?.agentName ?? "" < $1.value.first?.agentName ?? "" }
+            .map { (agentId: $0.key, agentName: $0.value.first?.agentName ?? $0.key, docs: $0.value.sorted { $0.displayTitle < $1.displayTitle }) }
     }
 
+    /// Incremented on each loadDocs() call to discard stale async results.
+    private var loadGeneration = 0
+
     func loadDocs() async {
+        loadGeneration += 1
+        let myGeneration = loadGeneration
+        let snapshotProjectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey)
+
         isLoading = true
         error = nil
         // Clear all stale state so a project switch never shows old data
@@ -72,6 +80,7 @@ class DocsStore {
         do {
             // 1. Fetch all agents
             let agentResponse = try await api.fetchAgents()
+            guard loadGeneration == myGeneration else { return }
             let agents = agentResponse.agents.filter { $0.status != "archived" }
 
             // 2. For each agent, fetch KB file list concurrently
@@ -102,20 +111,25 @@ class DocsStore {
                 }
             }
 
+            // Discard results if a newer load was started while we were fetching
+            guard loadGeneration == myGeneration else { return }
+
             docs = allDocs.sorted { $0.displayTitle < $1.displayTitle }
 
             if hadPartialFailure {
                 self.error = "Some agents' docs could not be loaded"
             }
 
-            // Only cache when all agents loaded successfully to avoid persisting partial results
-            if !hadPartialFailure, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+            // Only cache when all agents loaded successfully, using the project ID
+            // captured at the start to avoid writing under the wrong project.
+            if !hadPartialFailure, let projectId = snapshotProjectId {
                 CacheManager.save(docs.map { CachedDocItem(id: $0.id, fileName: $0.fileName, agentId: $0.agentId, agentName: $0.agentName) },
                                   key: "docs", projectId: projectId)
             }
         } catch {
+            guard loadGeneration == myGeneration else { return }
             // Fall back to cache only when docs are empty (cleared above on project switch)
-            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey),
+            if let projectId = snapshotProjectId,
                let cached = CacheManager.load([CachedDocItem].self, key: "docs", projectId: projectId) {
                 docs = cached.map { DocItem(id: $0.id, fileName: $0.fileName, agentId: $0.agentId, agentName: $0.agentName) }
             }

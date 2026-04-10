@@ -36,7 +36,7 @@ struct DocsView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
-                        ForEach(docsStore.agentGroups, id: \.agentName) { group in
+                        ForEach(docsStore.agentGroups, id: \.agentId) { group in
                             Section(group.agentName) {
                                 ForEach(group.docs) { doc in
                                     NavigationLink(value: doc) {
