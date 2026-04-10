@@ -64,8 +64,10 @@ class DocsStore {
     func loadDocs() async {
         isLoading = true
         error = nil
-        // Clear stale docs immediately so a project switch never shows old data
+        // Clear all stale state so a project switch never shows old data
         docs = []
+        selectedDoc = nil
+        docContent = nil
 
         do {
             // 1. Fetch all agents
@@ -101,6 +103,10 @@ class DocsStore {
             }
 
             docs = allDocs.sorted { $0.displayTitle < $1.displayTitle }
+
+            if hadPartialFailure {
+                self.error = "Some agents' docs could not be loaded"
+            }
 
             // Only cache when all agents loaded successfully to avoid persisting partial results
             if !hadPartialFailure, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {

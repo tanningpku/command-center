@@ -29,6 +29,13 @@ struct DocsView: View {
                     ContentUnavailableView.search(text: docsStore.searchText)
                 } else {
                     List {
+                        if let error = docsStore.error, !docsStore.docs.isEmpty {
+                            Section {
+                                Label(error, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
                         ForEach(docsStore.agentGroups, id: \.agentName) { group in
                             Section(group.agentName) {
                                 ForEach(group.docs) { doc in
