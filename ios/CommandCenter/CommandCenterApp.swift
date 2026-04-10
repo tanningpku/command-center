@@ -10,6 +10,7 @@ struct CommandCenterApp: App {
     @State private var boardStore: BoardStore
     @State private var homeStore: HomeStore
     @State private var healthStore: HealthStore
+    @State private var docsStore: DocsStore
     @State private var router = NavigationRouter()
 
     init() {
@@ -24,6 +25,7 @@ struct CommandCenterApp: App {
         self.boardStore = BoardStore(api: api)
         self.homeStore = HomeStore(api: api)
         self.healthStore = HealthStore(api: api)
+        self.docsStore = DocsStore(api: api)
     }
 
     var body: some Scene {
@@ -35,6 +37,7 @@ struct CommandCenterApp: App {
                 .environment(boardStore)
                 .environment(homeStore)
                 .environment(healthStore)
+                .environment(docsStore)
                 .environment(router)
                 .task {
                     await projectStore.load()

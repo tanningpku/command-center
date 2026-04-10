@@ -25,6 +25,10 @@ struct MainTabView: View {
                 .tag(NavigationRouter.Tab.board)
                 .tabItem { Label("Board", systemImage: "rectangle.split.3x1") }
 
+            DocsView()
+                .tag(NavigationRouter.Tab.docs)
+                .tabItem { Label("Docs", systemImage: "book") }
+
             HealthView()
                 .tag(NavigationRouter.Tab.health)
                 .tabItem { Label("Health", systemImage: "heart.text.square") }
