@@ -54,6 +54,10 @@ struct ChatView: View {
                         }
                     }
                 }
+                .overlay(alignment: .bottom) {
+                    CaptainBarView()
+                        .padding(.bottom, 8)
+                }
 
                 Divider()
 
