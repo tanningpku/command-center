@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Fetches tasks, agents, and threads, then composes dashboard blocks client-side.
+/// Captain-driven dashboard — fetches curated blocks from GET /api/dashboard,
+/// falls back to client-side composition if the dashboard is empty.
 @MainActor
 @Observable
 class HomeStore {
@@ -19,6 +20,32 @@ class HomeStore {
         isLoading = true
         error = nil
         do {
+            // Try captain-driven dashboard first
+            let dashboard = try await api.fetchDashboard()
+            if let captainBlocks = dashboard.blocks, !captainBlocks.isEmpty {
+                blocks = captainBlocks
+                updatedAt = dashboard.updatedAt
+            } else {
+                // Fallback: compose blocks client-side from raw data
+                await loadFallback()
+            }
+        } catch {
+            // Dashboard endpoint failed — try fallback
+            do {
+                await loadFallback()
+            } catch let fallbackError {
+                if let apiError = fallbackError as? APIError {
+                    self.error = apiError.errorDescription
+                } else {
+                    self.error = fallbackError.localizedDescription
+                }
+            }
+        }
+        isLoading = false
+    }
+
+    private func loadFallback() async {
+        do {
             async let tasksReq = api.fetchTasks()
             async let agentsReq = api.fetchAgents()
             async let threadsReq = api.fetchThreads()
@@ -31,15 +58,12 @@ class HomeStore {
                 threads: threadsResp.threads
             )
             updatedAt = ISO8601DateFormatter().string(from: Date())
-        } catch let apiError as APIError {
-            self.error = apiError.errorDescription
         } catch {
-            self.error = error.localizedDescription
+            throw error
         }
-        isLoading = false
     }
 
-    // MARK: - Block composition
+    // MARK: - Fallback block composition
 
     private func buildBlocks(tasks: [CCTask], agents: [CCAgent], threads: [CCThread]) -> [DashboardBlock] {
         var result: [DashboardBlock] = []

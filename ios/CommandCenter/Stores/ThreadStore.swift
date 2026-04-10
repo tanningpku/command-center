@@ -223,6 +223,9 @@ class ThreadStore {
                 captainThought = CaptainThought(agentName: "Captain", text: message)
             }
 
+        case "dashboard_update":
+            NotificationCenter.default.post(name: .dashboardUpdated, object: nil)
+
         case "project_created", "project_deleted", "project_updated":
             onProjectEvent?(event.type, event.payload)
 
