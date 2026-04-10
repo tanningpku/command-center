@@ -405,6 +405,7 @@ function renderDashboard(blocks) {
 
 function renderDashboardBlock(block) {
   switch (block.type) {
+    // New captain-driven block types
     case 'brief':          return renderBriefBlock(block);
     case 'attention':      return renderAttentionBlock(block);
     case 'thread_waiting': return renderThreadWaitingBlock(block);
@@ -413,6 +414,13 @@ function renderDashboardBlock(block) {
     case 'shipped':        return renderShippedBlock(block);
     case 'team_pulse':     return renderTeamPulseBlock(block);
     case 'stats':          return renderStatsBlock(block);
+    // Legacy block types (backward compatibility)
+    case 'hero':           return renderLegacyHeroBlock(block);
+    case 'alert':          return renderLegacyAlertBlock(block);
+    case 'activity':       return renderLegacyActivityBlock(block);
+    case 'list':           return renderLegacyListBlock(block);
+    case 'section':        return renderLegacySectionBlock(block);
+    case 'agents':         return renderLegacyAgentsBlock(block);
     default:               return '';
   }
 }
@@ -606,6 +614,79 @@ function renderStatsBlock(block) {
   html += `</div>`;
 
   return html;
+}
+
+// ── Legacy Block Renderers (backward compatibility) ─────────────
+
+function renderLegacyHeroBlock(block) {
+  const statusColors = { healthy: 'var(--cc-green)', warning: 'var(--cc-yellow)', critical: 'var(--cc-red)', info: 'var(--cc-accent)' };
+  const color = statusColors[block.status] || 'var(--cc-accent)';
+  return `
+    <div class="cc-dash-brief cc-dash-brief-${escapeHtml(block.status || 'healthy')}" style="border-left: 4px solid ${color}">
+      <div class="cc-dash-brief-header">
+        <div class="cc-dash-brief-avatar cc-dash-brief-avatar-${escapeHtml(block.status || 'healthy')}">C</div>
+        <span class="cc-dash-brief-name">${escapeHtml(block.status || '')}</span>
+      </div>
+      <div style="font-size:20px;font-weight:600;color:var(--cc-text);line-height:1.3">${escapeHtml(block.title || '')}</div>
+      ${block.subtitle ? `<div style="font-size:14px;color:var(--cc-text-muted);margin-top:4px">${escapeHtml(block.subtitle)}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderLegacyAlertBlock(block) {
+  const levelColors = { info: 'var(--cc-accent)', warning: 'var(--cc-yellow)', error: 'var(--cc-red)' };
+  const color = levelColors[block.level] || 'var(--cc-accent)';
+  return `
+    <div class="cc-dash-recommendation" style="border-color: ${color}">
+      ${block.title ? `<div class="cc-dash-recommendation-label" style="color:${color}">${escapeHtml(block.title)}</div>` : ''}
+      <div class="cc-dash-recommendation-text">${escapeHtml(block.message || '')}</div>
+    </div>
+  `;
+}
+
+function renderLegacyActivityBlock(block) {
+  const items = block.items || [];
+  let html = '';
+  if (block.title) html += `<div class="cc-dash-section-header">${escapeHtml(block.title)}</div>`;
+  html += items.map(item => `
+    <div class="cc-dash-inflight">
+      <div class="cc-dash-inflight-dot cc-dash-inflight-dot-active"></div>
+      <div class="cc-dash-inflight-info">
+        <div class="cc-dash-inflight-title">${escapeHtml(item.text || '')}</div>
+      </div>
+      ${item.time ? `<div class="cc-dash-inflight-agent">${escapeHtml(item.time)}</div>` : ''}
+    </div>
+  `).join('');
+  return html;
+}
+
+function renderLegacyListBlock(block) {
+  const items = block.items || [];
+  let html = '';
+  if (block.title) html += `<div class="cc-dash-section-header">${escapeHtml(block.title)}</div>`;
+  html += items.map(item => `
+    <div class="cc-dash-inflight">
+      <div class="cc-dash-inflight-info">
+        <div class="cc-dash-inflight-title">${escapeHtml(item.text || item.title || '')}</div>
+      </div>
+      ${item.assignee ? `<div class="cc-dash-inflight-agent">${escapeHtml(item.assignee)}</div>` : ''}
+    </div>
+  `).join('');
+  return html;
+}
+
+function renderLegacySectionBlock(block) {
+  return `
+    <div style="background:var(--cc-surface);border:1px solid var(--cc-border);border-radius:10px;padding:16px 20px;margin-bottom:8px">
+      ${block.title ? `<div class="cc-dash-section-header" style="margin-top:0">${escapeHtml(block.title)}</div>` : ''}
+      <div style="font-size:13px;line-height:1.6;color:var(--cc-text-secondary)" class="cc-markdown">${renderMarkdown(block.content || block.body || '')}</div>
+    </div>
+  `;
+}
+
+function renderLegacyAgentsBlock(block) {
+  const agents = block.agents || [];
+  return renderTeamPulseBlock({ agents });
 }
 
 // ── Docs Tab ────────────────────────────────────────────────────
