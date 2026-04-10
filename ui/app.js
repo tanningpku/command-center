@@ -323,8 +323,8 @@ function showTab(tabName) {
   // Show selected tab
   const tabEl = document.getElementById(`tab-${tabName}`);
   if (tabEl) {
-    // Threads tab needs flex layout for the split panel
-    tabEl.style.display = tabName === 'threads' ? 'flex' : 'block';
+    // Threads and docs tabs need flex layout for the split panel
+    tabEl.style.display = (tabName === 'threads' || tabName === 'docs') ? 'flex' : 'block';
   }
 
   // Load tab data
@@ -344,6 +344,9 @@ async function loadTabData(tabName) {
       break;
     case 'threads':
       await loadThreadsData();
+      break;
+    case 'docs':
+      await loadDocsData();
       break;
     case 'health':
       await loadHealthData();
@@ -565,6 +568,154 @@ function renderAgentsBlock(block) {
       </div>
     </div>
   `;
+}
+
+// ── Docs Tab ────────────────────────────────────────────────────
+
+const DOCS_SYSTEM_FILES = ['identity.md', 'tools.md'];
+
+async function loadDocsData() {
+  if (!state.selectedProjectId) return;
+  const loadProjectId = state.selectedProjectId;
+
+  // Reset reader state to avoid showing stale content from a different project
+  state._activeDocKey = null;
+  state._docsItems = [];
+  const headerEl = document.getElementById('docsReaderHeader');
+  const contentEl = document.getElementById('docsReaderContent');
+  const emptyEl = document.getElementById('docsEmptyState');
+  headerEl.style.display = 'none';
+  contentEl.style.display = 'none';
+  emptyEl.style.display = 'flex';
+
+  const listEl = document.getElementById('docsList');
+  const countEl = document.getElementById('docsCount');
+  listEl.innerHTML = `<div class="cc-loading">Loading docs...</div>`;
+  countEl.textContent = '';
+
+  try {
+    // Fetch all agents
+    const agentData = await apiCall('/api/assistants');
+    if (state.selectedProjectId !== loadProjectId) return; // project changed
+    const agents = agentData.assistants || agentData || [];
+
+    // Fetch KB file lists for each agent in parallel
+    const kbResults = await Promise.allSettled(
+      agents.map(a => agentApiCall('/api/kb/list', a.id).then(d => ({ agentId: a.id, agentName: a.name || a.id, files: d.files || [] })))
+    );
+    if (state.selectedProjectId !== loadProjectId) return; // project changed
+
+    // Also fetch captain KB
+    const captainResult = await apiCall('/api/kb/list?agent=captain').catch(() => ({ files: [] }));
+    if (state.selectedProjectId !== loadProjectId) return; // project changed
+    const captainFiles = (captainResult.files || []).filter(f => !DOCS_SYSTEM_FILES.includes(f));
+
+    // Aggregate all docs, filtering out system files
+    const allDocs = [];
+
+    // Captain docs
+    captainFiles.forEach(file => {
+      allDocs.push({ file, agentId: 'captain', agentName: 'Captain' });
+    });
+
+    // Agent docs
+    kbResults.forEach(result => {
+      if (result.status !== 'fulfilled') return;
+      const { agentId, agentName, files } = result.value;
+      files
+        .filter(f => !DOCS_SYSTEM_FILES.includes(f))
+        .forEach(file => {
+          // Avoid duplicates from captain
+          if (agentId === 'captain') return;
+          allDocs.push({ file, agentId, agentName });
+        });
+    });
+
+    state._docsItems = allDocs;
+    countEl.textContent = allDocs.length;
+    renderDocsList(allDocs);
+
+    // Bind search filter
+    const searchEl = document.getElementById('docsSearch');
+    searchEl.oninput = () => {
+      const q = searchEl.value.trim().toLowerCase();
+      if (!q) {
+        renderDocsList(state._docsItems);
+      } else {
+        renderDocsList(state._docsItems.filter(d =>
+          d.file.toLowerCase().includes(q) || d.agentName.toLowerCase().includes(q)
+        ));
+      }
+    };
+  } catch (err) {
+    console.error('Failed to load docs:', err);
+    listEl.innerHTML = `<div class="cc-docs-sidebar-empty">Unable to load docs: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function docTitle(filename) {
+  return filename
+    .replace(/\.md$/i, '')
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function renderDocsList(docs) {
+  const listEl = document.getElementById('docsList');
+  if (!docs || docs.length === 0) {
+    listEl.innerHTML = `<div class="cc-docs-sidebar-empty">No design docs found.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = docs.map(doc => `
+    <div class="cc-doc-card ${state._activeDocKey === doc.agentId + ':' + doc.file ? 'cc-doc-card-active' : ''}"
+         data-doc-file="${escapeHtml(doc.file)}" data-doc-agent="${escapeHtml(doc.agentId)}">
+      <div class="cc-doc-card-title">${escapeHtml(docTitle(doc.file))}</div>
+      <div class="cc-doc-card-meta">${escapeHtml(doc.agentName)} &middot; ${escapeHtml(doc.file)}</div>
+    </div>
+  `).join('');
+
+  // Bind click handlers
+  listEl.querySelectorAll('.cc-doc-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const file = card.dataset.docFile;
+      const agentId = card.dataset.docAgent;
+      openDoc(file, agentId, docs.find(d => d.file === file && d.agentId === agentId));
+    });
+  });
+}
+
+async function openDoc(file, agentId, docMeta) {
+  const headerEl = document.getElementById('docsReaderHeader');
+  const contentEl = document.getElementById('docsReaderContent');
+  const emptyEl = document.getElementById('docsEmptyState');
+  const titleEl = document.getElementById('docsReaderTitle');
+  const agentEl = document.getElementById('docsReaderAgent');
+
+  const docKey = agentId + ':' + file;
+  state._activeDocKey = docKey;
+
+  // Update active card styling
+  document.querySelectorAll('.cc-doc-card').forEach(c => c.classList.remove('cc-doc-card-active'));
+  const active = document.querySelector(`.cc-doc-card[data-doc-file="${CSS.escape(file)}"][data-doc-agent="${CSS.escape(agentId)}"]`);
+  if (active) active.classList.add('cc-doc-card-active');
+
+  // Show header and loading state
+  emptyEl.style.display = 'none';
+  headerEl.style.display = 'flex';
+  contentEl.style.display = 'block';
+  titleEl.textContent = docTitle(file);
+  agentEl.textContent = docMeta ? docMeta.agentName : agentId;
+  contentEl.innerHTML = `<div class="cc-loading">Loading...</div>`;
+
+  try {
+    const data = await agentApiCall(`/api/kb/read?file=${encodeURIComponent(file)}`, agentId);
+    if (state._activeDocKey !== docKey) return; // user opened a different doc
+    contentEl.innerHTML = renderMarkdown(data.content || '');
+  } catch (err) {
+    if (state._activeDocKey !== docKey) return;
+    contentEl.innerHTML = `<div class="cc-docs-error">Failed to load document: ${escapeHtml(err.message)}</div>`;
+  }
 }
 
 // ── Team Tab ─────────────────────────────────────────────────────
@@ -2700,6 +2851,9 @@ function getActiveListContainer() {
   if (state.activeTab === 'team') {
     return document.getElementById('teamGrid');
   }
+  if (state.activeTab === 'docs') {
+    return document.getElementById('docsList');
+  }
   return null;
 }
 
@@ -2733,6 +2887,7 @@ function showShortcutHelp() {
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>t</kbd><span>Go to Team</span></div>
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>b</kbd><span>Go to Board</span></div>
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>r</kbd><span>Go to Threads</span></div>
+          <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>d</kbd><span>Go to Docs</span></div>
           <div class="cc-shortcut-row"><kbd>g</kbd> <kbd>x</kbd><span>Go to Health</span></div>
         </div>
         <div class="cc-shortcut-group">
@@ -2782,9 +2937,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Ctrl/Cmd + number shortcuts — work even when input is focused
-  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '5') {
+  if ((e.ctrlKey || e.metaKey) && key >= '1' && key <= '6') {
     e.preventDefault();
-    const tabs = ['home', 'team', 'board', 'threads', 'health'];
+    const tabs = ['home', 'team', 'board', 'threads', 'docs', 'health'];
     const idx = parseInt(key, 10) - 1;
     if (tabs[idx] && state.selectedProjectId) {
       showTab(tabs[idx]);
@@ -2813,7 +2968,7 @@ document.addEventListener('keydown', (e) => {
 
   // g+X chord navigation
   if (_lastKey === 'g' && (now - _lastKeyTime) < CHORD_TIMEOUT && state.selectedProjectId) {
-    const chordMap = { h: 'home', t: 'team', b: 'board', r: 'threads', x: 'health' };
+    const chordMap = { h: 'home', t: 'team', b: 'board', r: 'threads', d: 'docs', x: 'health' };
     const tab = chordMap[key];
     if (tab) {
       e.preventDefault();
@@ -2836,7 +2991,7 @@ document.addEventListener('keydown', (e) => {
     if (!container) { _lastKey = null; return; }
 
     // Mark items as selectable if not already
-    const selectableSelector = state.activeTab === 'threads' ? '.cc-thread-card' : '.cc-team-card';
+    const selectableSelector = state.activeTab === 'threads' ? '.cc-thread-card' : state.activeTab === 'docs' ? '.cc-doc-card' : '.cc-team-card';
     const items = container.querySelectorAll(selectableSelector);
     items.forEach(el => el.setAttribute('data-kb-selectable', ''));
 
@@ -2907,7 +3062,7 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
 async function startApp() {
   // Restore tab and thread from localStorage before loading projects
   const savedTab = localStorage.getItem('cc-activeTab');
-  if (savedTab && ['home', 'team', 'board', 'threads', 'health'].includes(savedTab)) {
+  if (savedTab && ['home', 'team', 'board', 'threads', 'docs', 'health'].includes(savedTab)) {
     state.activeTab = savedTab;
   }
   const savedThreadId = localStorage.getItem('cc-activeThreadId');
