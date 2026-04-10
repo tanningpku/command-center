@@ -49,9 +49,11 @@ struct TaskDetailSheet: View {
     @Environment(\.dismiss) var dismiss
     @Environment(NavigationRouter.self) var router
     @Environment(BoardStore.self) var boardStore
+    @Environment(DocsStore.self) var docsStore
 
     @State private var isUpdating = false
     @State private var updateError: String?
+    @State private var showingDesign: DocItem?
 
     /// Logical next states based on current state
     private var availableTransitions: [TaskState] {
@@ -144,6 +146,34 @@ struct TaskDetailSheet: View {
                     }
                 }
 
+                if !task.designDocs.isEmpty {
+                    Section("Linked Designs") {
+                        ForEach(task.designDocs, id: \.self) { ref in
+                            Button {
+                                openDesign(ref: ref)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "paintbrush.pointed")
+                                        .foregroundStyle(.purple)
+                                        .frame(width: 20)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(designDisplayName(ref))
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                        Text(ref)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if !task.labels.isEmpty {
                     Section("Labels") {
                         FlowLayout(spacing: 6) {
@@ -168,6 +198,45 @@ struct TaskDetailSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheet(item: $showingDesign) { doc in
+            NavigationStack {
+                DocDetailView(doc: doc)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showingDesign = nil }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// Parse "agentId:filename" ref into a DocItem for navigation.
+    private func openDesign(ref: String) {
+        let parts = ref.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2 else { return }
+        let agentId = String(parts[0])
+        let fileName = String(parts[1])
+        let agentName = docsStore.docs.first(where: { $0.agentId == agentId })?.agentName ?? agentId
+        let doc = DocItem(
+            id: "design:\(agentId)/\(fileName)",
+            fileName: fileName,
+            agentId: agentId,
+            agentName: agentName,
+            type: .design,
+            size: nil,
+            modified: nil
+        )
+        showingDesign = doc
+    }
+
+    private func designDisplayName(_ ref: String) -> String {
+        let parts = ref.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2 else { return ref }
+        return String(parts[1])
+            .replacingOccurrences(of: ".html", with: "")
+            .split(separator: "-").joined(separator: " ")
+            .split(separator: "_").joined(separator: " ")
+            .localizedCapitalized
     }
 
     private func transitionTo(_ newState: TaskState) {

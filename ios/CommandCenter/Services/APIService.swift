@@ -200,6 +200,16 @@ actor APIService {
         return try await fetch("api/kb/read", query: query)
     }
 
+    // MARK: - Designs
+
+    func fetchDesignsList(agentId: String) async throws -> DesignsListResponse {
+        try await fetch("api/designs/list", query: [("agent", agentId)])
+    }
+
+    func fetchDesignRead(agentId: String, fileName: String) async throws -> DesignReadResponse {
+        try await fetch("api/designs/read", query: [("agent", agentId), ("file", fileName)])
+    }
+
     // MARK: - Voice transcription
 
     func transcribeAudio(fileURL: URL) async throws -> TranscriptionResponse {
@@ -342,6 +352,21 @@ struct KBReadResponse: Codable {
     let file: String
     let content: String
     let section: String?
+}
+
+struct DesignsListResponse: Codable {
+    let files: [DesignFileInfo]
+}
+
+struct DesignFileInfo: Codable {
+    let name: String
+    let size: Int
+    let modified: String
+}
+
+struct DesignReadResponse: Codable {
+    let file: String
+    let content: String
 }
 
 struct TranscriptionResponse: Codable {
