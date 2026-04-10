@@ -2761,10 +2761,9 @@ function openNewProjectModal() {
   const modal = document.getElementById('newProjectModal');
   const errorEl = document.getElementById('newProjectError');
   errorEl.style.display = 'none';
-  document.getElementById('projectDir').value = '';
-  document.getElementById('captainName').value = 'Captain';
+  document.getElementById('projectName').value = '';
   modal.style.display = 'flex';
-  document.getElementById('projectDir').focus();
+  document.getElementById('projectName').focus();
 }
 
 function closeNewProjectModal() {
@@ -2784,12 +2783,11 @@ document.getElementById('newProjectModal').addEventListener('click', (e) => {
 document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  const directory = document.getElementById('projectDir').value.trim();
-  const captainName = document.getElementById('captainName').value.trim();
+  const name = document.getElementById('projectName').value.trim();
   const errorEl = document.getElementById('newProjectError');
   const submitBtn = e.target.querySelector('button[type="submit"]');
 
-  if (!directory || !captainName) return;
+  if (!name) return;
 
   errorEl.style.display = 'none';
   submitBtn.disabled = true;
@@ -2802,7 +2800,7 @@ document.getElementById('newProjectForm').addEventListener('submit', async (e) =
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: postHeaders,
-      body: JSON.stringify({ directory, captainName }),
+      body: JSON.stringify({ name }),
     });
     if (res.status === 401) { handle401(); return; }
     const data = await res.json();
