@@ -64,6 +64,8 @@ class DocsStore {
     func loadDocs() async {
         isLoading = true
         error = nil
+        // Clear stale docs immediately so a project switch never shows old data
+        docs = []
 
         do {
             // 1. Fetch all agents
@@ -72,13 +74,14 @@ class DocsStore {
 
             // 2. For each agent, fetch KB file list concurrently
             var allDocs: [DocItem] = []
-            await withTaskGroup(of: [DocItem].self) { group in
+            var hadPartialFailure = false
+            await withTaskGroup(of: (Bool, [DocItem]).self) { group in
                 for agent in agents {
                     group.addTask { [api] in
                         guard let kbResponse = try? await api.fetchKBList(agentId: agent.id) else {
-                            return []
+                            return (false, [])
                         }
-                        return kbResponse.files
+                        let items = kbResponse.files
                             .filter { !Self.excludedFiles.contains($0) }
                             .map { file in
                                 DocItem(
@@ -88,24 +91,25 @@ class DocsStore {
                                     agentName: agent.name
                                 )
                             }
+                        return (true, items)
                     }
                 }
-                for await items in group {
+                for await (succeeded, items) in group {
+                    if !succeeded { hadPartialFailure = true }
                     allDocs.append(contentsOf: items)
                 }
             }
 
             docs = allDocs.sorted { $0.displayTitle < $1.displayTitle }
 
-            // Cache
-            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
+            // Only cache when all agents loaded successfully to avoid persisting partial results
+            if !hadPartialFailure, let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey) {
                 CacheManager.save(docs.map { CachedDocItem(id: $0.id, fileName: $0.fileName, agentId: $0.agentId, agentName: $0.agentName) },
                                   key: "docs", projectId: projectId)
             }
         } catch {
-            // Fall back to cache
-            if docs.isEmpty,
-               let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey),
+            // Fall back to cache only when docs are empty (cleared above on project switch)
+            if let projectId = UserDefaults.standard.string(forKey: AppConfig.selectedProjectKey),
                let cached = CacheManager.load([CachedDocItem].self, key: "docs", projectId: projectId) {
                 docs = cached.map { DocItem(id: $0.id, fileName: $0.fileName, agentId: $0.agentId, agentName: $0.agentName) }
             }
@@ -116,13 +120,17 @@ class DocsStore {
     }
 
     func loadDocContent(doc: DocItem) async {
+        let requestedDoc = doc
         selectedDoc = doc
         docContent = nil
         isLoadingContent = true
         do {
             let response = try await api.fetchKBRead(agentId: doc.agentId, fileName: doc.fileName)
+            // Guard against race: only update if this is still the selected doc
+            guard selectedDoc == requestedDoc else { return }
             docContent = response.content
         } catch {
+            guard selectedDoc == requestedDoc else { return }
             docContent = "Error loading document: \(error.localizedDescription)"
         }
         isLoadingContent = false
