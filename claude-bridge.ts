@@ -226,6 +226,8 @@ export class ClaudeBridge extends EventEmitter {
   private lastUserMessageAt = 0;
   /** Timestamp of most recent response from Claude (assistant text or result) */
   private lastResponseAt = 0;
+  /** Timestamp of most recent tool activity (can_use_tool permission request) */
+  private lastToolActivityAt = 0;
   /** Number of user messages sent that haven't received a result yet */
   private pendingMessages = 0;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -296,6 +298,7 @@ export class ClaudeBridge extends EventEmitter {
       started_at: this.bridgeStartedAt > 0 ? new Date(this.bridgeStartedAt).toISOString() : null,
       last_activity_at: new Date(this.lastActivityAt).toISOString(),
       last_response_at: this.lastResponseAt > 0 ? new Date(this.lastResponseAt).toISOString() : null,
+      last_tool_activity_at: this.lastToolActivityAt > 0 ? new Date(this.lastToolActivityAt).toISOString() : null,
       pending_messages: this.pendingMessages,
       restart_count: this._restartCount,
       last_restart_reason: this._lastRestartReason,
@@ -430,6 +433,7 @@ export class ClaudeBridge extends EventEmitter {
     // Only reset zombie timer when starting a fresh turn, not when queueing behind an in-flight turn
     if (this.pendingMessages === 0) {
       this.lastResponseAt = 0; // Reset so zombie timer measures from this turn, not a previous one
+      this.lastToolActivityAt = 0; // Reset tool tracking for fresh turn
     }
     this.pendingMessages++;
     const ts = Date.now();
@@ -645,6 +649,7 @@ export class ClaudeBridge extends EventEmitter {
       const request = message.request as Record<string, unknown> | undefined;
       const subtype = String(request?.subtype ?? "");
       if (subtype === "can_use_tool") {
+        this.lastToolActivityAt = Date.now();
         const requestId = String(message.request_id ?? "");
         const toolInput = (request?.input ?? request?.tool_input ?? {}) as Record<string, unknown>;
         this.send(buildPermissionResponse(requestId, "allow", toolInput));
@@ -741,6 +746,15 @@ export class ClaudeBridge extends EventEmitter {
     // Uses SDK message timestamps (not stdout/stderr) to avoid killing long-running tools.
     const sinceSdkMessage = this.lastSdkMessageAt > 0 ? now - this.lastSdkMessageAt : Infinity;
     if (this.pendingMessages > 0 && sinceSdkMessage < ClaudeBridge.STUCK_TIMEOUT_MS) {
+      // Tool activity check: if the agent is actively executing tools (can_use_tool requests
+      // are flowing), it's working — not a zombie. Skip the kill. This prevents false zombie
+      // kills during deep investigation (file reads, greps, bash commands, etc.)
+      const sinceToolActivity = this.lastToolActivityAt > 0 ? now - this.lastToolActivityAt : Infinity;
+      if (sinceToolActivity < ClaudeBridge.STUCK_TIMEOUT_MS) {
+        // Agent is actively using tools — not a zombie
+        return;
+      }
+
       const sinceResponse = this.lastResponseAt > 0
         ? now - this.lastResponseAt
         : now - this.lastUserMessageAt; // Never responded — measure from when we sent
@@ -748,7 +762,8 @@ export class ClaudeBridge extends EventEmitter {
         console.warn(
           `[${this.tag}] WATCHDOG: Bridge zombie — receiving messages but no response for ` +
           `${Math.round(sinceResponse / 1000)}s (${this.pendingMessages} pending, ` +
-          `${this._messagesReceived} received, ${this._messagesSent} sent). Killing subprocess.`,
+          `${this._messagesReceived} received, ${this._messagesSent} sent, ` +
+          `last tool activity: ${sinceToolActivity === Infinity ? "never" : Math.round(sinceToolActivity / 1000) + "s ago"}). Killing subprocess.`,
         );
         this.emit("zombie_kill", {
           agentId: this.opts.agentId ?? "captain",
