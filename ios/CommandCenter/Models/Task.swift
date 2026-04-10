@@ -73,6 +73,7 @@ struct CCTask: Identifiable, Codable, Hashable {
     let labels: [String]
     let threadId: String?
     let latestUpdate: String?
+    let designDocs: [String]
     let createdAt: String
     let updatedAt: String
 
@@ -83,6 +84,7 @@ struct CCTask: Identifiable, Codable, Hashable {
         case createdBy = "created_by"
         case threadId = "thread_id"
         case latestUpdate = "latest_update"
+        case designDocs = "design_docs"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -90,7 +92,7 @@ struct CCTask: Identifiable, Codable, Hashable {
     // SSE payloads may use camelCase
     enum AltCodingKeys: String, CodingKey {
         case id, title, description, state, assignee, priority, labels
-        case githubIssue, githubPR, createdBy, threadId, latestUpdate, createdAt, updatedAt
+        case githubIssue, githubPR, createdBy, threadId, latestUpdate, designDocs, createdAt, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -107,6 +109,7 @@ struct CCTask: Identifiable, Codable, Hashable {
             labels = (try? c.decode([String].self, forKey: .labels)) ?? []
             threadId = try? c.decode(String.self, forKey: .threadId)
             latestUpdate = try? c.decode(String.self, forKey: .latestUpdate)
+            designDocs = (try? c.decode([String].self, forKey: .designDocs)) ?? []
             createdAt = (try? c.decode(String.self, forKey: .createdAt)) ?? ""
             updatedAt = (try? c.decode(String.self, forKey: .updatedAt)) ?? ""
         } else {
@@ -123,6 +126,7 @@ struct CCTask: Identifiable, Codable, Hashable {
             labels = (try? c.decode([String].self, forKey: .labels)) ?? []
             threadId = try? c.decode(String.self, forKey: .threadId)
             latestUpdate = try? c.decode(String.self, forKey: .latestUpdate)
+            designDocs = (try? c.decode([String].self, forKey: .designDocs)) ?? []
             createdAt = (try? c.decode(String.self, forKey: .createdAt)) ?? ""
             updatedAt = (try? c.decode(String.self, forKey: .updatedAt)) ?? ""
         }
@@ -142,6 +146,7 @@ struct CCTask: Identifiable, Codable, Hashable {
         try c.encode(labels, forKey: .labels)
         try c.encodeIfPresent(threadId, forKey: .threadId)
         try c.encodeIfPresent(latestUpdate, forKey: .latestUpdate)
+        try c.encode(designDocs, forKey: .designDocs)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(updatedAt, forKey: .updatedAt)
     }
