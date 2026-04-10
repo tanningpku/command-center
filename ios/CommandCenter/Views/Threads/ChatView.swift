@@ -135,6 +135,10 @@ struct ChatView: View {
             if let proxy = scrollProxy {
                 scrollToBottom(proxy: proxy)
             }
+            // Brief captain bar pulse — confirms overlay is visible & SSE is wired up
+            if threadStore.captainThought == nil {
+                threadStore.captainThought = CaptainThought(agentName: "Captain", text: "Watching this thread...")
+            }
             // Get API service from the base URL
             if let url = AppConfig.baseURL {
                 apiService = APIService(baseURL: url)
