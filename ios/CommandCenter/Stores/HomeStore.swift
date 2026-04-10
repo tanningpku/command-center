@@ -73,14 +73,15 @@ class HomeStore {
             result.append(buildActiveWorkBlock(inProgress))
         }
 
-        // 5. Agent status cards
-        if !agents.isEmpty {
-            result.append(buildAgentsBlock(agents))
+        // 5. Agent status cards (exclude archived)
+        let visibleAgents = agents.filter { $0.status != "archived" }
+        if !visibleAgents.isEmpty {
+            result.append(buildAgentsBlock(visibleAgents))
         }
 
-        // 6. Recent activity from threads
+        // 6. Recent activity from threads (sort by parsed date)
         let recentThreads = threads
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { parseISO8601($0.updatedAt) > parseISO8601($1.updatedAt) }
             .prefix(8)
         if !recentThreads.isEmpty {
             result.append(buildActivityBlock(Array(recentThreads)))
@@ -179,5 +180,13 @@ class HomeStore {
             ])
         }
         return DashboardBlock(type: "activity", title: "Recent Activity", items: items)
+    }
+
+    private func parseISO8601(_ string: String) -> Date {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fmt.date(from: string) { return date }
+        fmt.formatOptions = [.withInternetDateTime]
+        return fmt.date(from: string) ?? .distantPast
     }
 }
