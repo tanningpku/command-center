@@ -576,6 +576,17 @@ const DOCS_SYSTEM_FILES = ['identity.md', 'tools.md'];
 
 async function loadDocsData() {
   if (!state.selectedProjectId) return;
+  const loadProjectId = state.selectedProjectId;
+
+  // Reset reader state to avoid showing stale content from a different project
+  state._activeDocKey = null;
+  state._docsItems = [];
+  const headerEl = document.getElementById('docsReaderHeader');
+  const contentEl = document.getElementById('docsReaderContent');
+  const emptyEl = document.getElementById('docsEmptyState');
+  headerEl.style.display = 'none';
+  contentEl.style.display = 'none';
+  emptyEl.style.display = 'flex';
 
   const listEl = document.getElementById('docsList');
   const countEl = document.getElementById('docsCount');
@@ -585,15 +596,18 @@ async function loadDocsData() {
   try {
     // Fetch all agents
     const agentData = await apiCall('/api/assistants');
+    if (state.selectedProjectId !== loadProjectId) return; // project changed
     const agents = agentData.assistants || agentData || [];
 
     // Fetch KB file lists for each agent in parallel
     const kbResults = await Promise.allSettled(
       agents.map(a => agentApiCall('/api/kb/list', a.id).then(d => ({ agentId: a.id, agentName: a.name || a.id, files: d.files || [] })))
     );
+    if (state.selectedProjectId !== loadProjectId) return; // project changed
 
     // Also fetch captain KB
     const captainResult = await apiCall('/api/kb/list?agent=captain').catch(() => ({ files: [] }));
+    if (state.selectedProjectId !== loadProjectId) return; // project changed
     const captainFiles = (captainResult.files || []).filter(f => !DOCS_SYSTEM_FILES.includes(f));
 
     // Aggregate all docs, filtering out system files
