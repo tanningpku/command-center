@@ -643,9 +643,11 @@ function renderLegacyHeroBlock(block) {
 
 function renderLegacyAlertBlock(block) {
   const levelColors = { info: 'var(--cc-accent)', warning: 'var(--cc-yellow)', error: 'var(--cc-red)' };
+  const levelBgs = { info: 'var(--cc-accent-bg)', warning: 'var(--cc-yellow-bg)', error: 'var(--cc-red-bg)' };
   const color = levelColors[block.level] || 'var(--cc-accent)';
+  const bg = levelBgs[block.level] || 'var(--cc-accent-bg)';
   return `
-    <div class="cc-dash-recommendation" style="border-color: ${color}">
+    <div class="cc-dash-recommendation" style="border-color: ${color}; background: ${bg}">
       ${block.title ? `<div class="cc-dash-recommendation-label" style="color:${color}">${escapeHtml(block.title)}</div>` : ''}
       <div class="cc-dash-recommendation-text">${escapeHtml(block.message || '')}</div>
     </div>

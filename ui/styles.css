@@ -2434,6 +2434,11 @@ body {
   border: 1px solid rgba(248, 81, 73, 0.15);
 }
 
+.cc-dash-brief-info {
+  background: linear-gradient(135deg, rgba(88, 166, 255, 0.08), rgba(88, 166, 255, 0.03));
+  border: 1px solid rgba(88, 166, 255, 0.15);
+}
+
 .cc-dash-brief-header {
   display: flex;
   align-items: center;
@@ -2456,6 +2461,7 @@ body {
 .cc-dash-brief-avatar-healthy  { background: rgba(63, 185, 80, 0.2);  color: var(--cc-green); }
 .cc-dash-brief-avatar-warning  { background: rgba(210, 153, 34, 0.2); color: var(--cc-yellow); }
 .cc-dash-brief-avatar-critical { background: rgba(248, 81, 73, 0.2);  color: var(--cc-red); }
+.cc-dash-brief-avatar-info     { background: rgba(88, 166, 255, 0.2); color: var(--cc-accent); }
 
 .cc-dash-brief-name {
   font-size: 13px;
