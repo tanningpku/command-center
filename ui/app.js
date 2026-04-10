@@ -692,7 +692,8 @@ async function openDoc(file, agentId, docMeta) {
   const titleEl = document.getElementById('docsReaderTitle');
   const agentEl = document.getElementById('docsReaderAgent');
 
-  state._activeDocKey = agentId + ':' + file;
+  const docKey = agentId + ':' + file;
+  state._activeDocKey = docKey;
 
   // Update active card styling
   document.querySelectorAll('.cc-doc-card').forEach(c => c.classList.remove('cc-doc-card-active'));
@@ -709,8 +710,10 @@ async function openDoc(file, agentId, docMeta) {
 
   try {
     const data = await agentApiCall(`/api/kb/read?file=${encodeURIComponent(file)}`, agentId);
+    if (state._activeDocKey !== docKey) return; // user opened a different doc
     contentEl.innerHTML = renderMarkdown(data.content || '');
   } catch (err) {
+    if (state._activeDocKey !== docKey) return;
     contentEl.innerHTML = `<div class="cc-docs-error">Failed to load document: ${escapeHtml(err.message)}</div>`;
   }
 }
