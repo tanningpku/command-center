@@ -420,6 +420,58 @@ case "${1:-help}" in
     esac
     ;;
 
+  # ── Design commands ────────────────────────────────────────────
+  design)
+    case "${2:-list}" in
+      list)
+        shift 2 2>/dev/null || true
+        json_get "/api/designs/list"
+        ;;
+      read)
+        shift 2
+        FILE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        json_get "/api/designs/read?file=$FILE"
+        ;;
+      write)
+        shift 2
+        FILE="" CONTENT=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            --content) CONTENT="$2"; shift 2;;
+            --content-file) CONTENT="$(cat "$2")"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        [ -z "$CONTENT" ] && echo "Error: --content or --content-file is required" && exit 2
+        BODY=$(jq -nc --arg f "$FILE" --arg c "$CONTENT" '{file:$f, content:$c}')
+        json_post "/api/designs/write" "$BODY"
+        ;;
+      delete)
+        shift 2
+        FILE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --file) FILE="$2"; shift 2;;
+            *) shift;;
+          esac
+        done
+        [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
+        BODY=$(jq -nc --arg f "$FILE" '{file:$f}')
+        json_post "/api/designs/delete" "$BODY"
+        ;;
+      *) echo "Usage: cc design <list|read|write|delete>"; exit 2;;
+    esac
+    ;;
+
   # ── Dashboard commands ─────────────────────────────────────────
   dashboard)
     case "${2:-get}" in
@@ -846,7 +898,7 @@ for b in bridges:
     echo "Task Management:"
     echo "  task create   --title <t> [--priority <p>] [--assignee <a>] [--collaborators <c1,c2>] [--github-issue <n>]"
     echo "  task list     [--state <s>] [--assignee <a>] [--priority <p>] [--search <q>] [--labels <l1,l2>]"
-    echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>]"
+    echo "  task update   --id <id> [--state <s>] [--note <n>] [--assignee <a>] [--pr <n>] [--design-docs <comma-sep>]"
     echo "  task complete --id <id> [--note <n>]"
     echo "  task subscribe --id <id>  Subscribe to task updates"
     echo "  task sync     Sync GitHub issues to tasks"
@@ -870,6 +922,13 @@ for b in bridges:
     echo "  kb patch      --file <f> --append <text> [--section <s>]"
     echo "  kb delete     --file <f>"
     echo "  kb delete-section --file <f> --section <s>"
+    echo ""
+    echo "Design Artifacts:"
+    echo "  design list"
+    echo "  design read   --file <f>"
+    echo "  design write  --file <f> --content <c>"
+    echo "  design write  --file <f> --content-file <path>"
+    echo "  design delete --file <f>"
     echo ""
     echo "Dashboard:"
     echo "  dashboard get                   Get current dashboard blocks"
