@@ -576,9 +576,12 @@ const DOCS_SYSTEM_FILES = ['identity.md', 'tools.md'];
 
 async function loadDocsData() {
   if (!state.selectedProjectId) { state._docsLoadPromise = null; return; }
-  // Store the promise so navigateToDesign can await it
-  if (!state._docsLoadPromise || state._docsLoadDone) {
+  // Store the promise so navigateToDesign can await it.
+  // Always start a fresh load if the project changed or the previous load finished.
+  const projectChanged = state._docsLoadProject !== state.selectedProjectId;
+  if (!state._docsLoadPromise || state._docsLoadDone || projectChanged) {
     state._docsLoadDone = false;
+    state._docsLoadProject = state.selectedProjectId;
     state._docsLoadPromise = _loadDocsDataInner();
   }
   return state._docsLoadPromise;
@@ -601,7 +604,10 @@ async function _loadDocsDataInner() {
   frameEl.style.display = 'none';
   emptyEl.style.display = 'flex';
   fullscreenBtn.style.display = 'none';
+  fullscreenBtn.textContent = 'Fullscreen';
   metaEl.textContent = '';
+  // Clear fullscreen mode on reader reset (e.g. project switch)
+  document.getElementById('docsReader').classList.remove('cc-docs-reader-fullscreen');
 
   const listEl = document.getElementById('docsList');
   const countEl = document.getElementById('docsCount');
