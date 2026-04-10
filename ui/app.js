@@ -354,7 +354,7 @@ async function loadTabData(tabName) {
   }
 }
 
-// ── Home Tab (Dashboard) ────────────────────────────────────────
+// ── Home Tab (Captain-Driven Dashboard) ─────────────────────────
 
 async function loadDashboardData() {
   if (!state.selectedProjectId) return;
@@ -370,17 +370,17 @@ async function loadDashboardData() {
     if (is404) {
       dom.dashboardContainer.innerHTML = `
         <div class="cc-dashboard-empty">
-          <div class="cc-empty-icon">H</div>
-          <h2>Dashboard</h2>
-          <p>No dashboard configured yet. Captain will populate this once the project is active.</p>
+          <div class="cc-empty-icon">C</div>
+          <h2>Home</h2>
+          <p>Captain will populate this dashboard once the project is active.</p>
         </div>
       `;
     } else {
       console.error('Failed to load dashboard:', err);
       dom.dashboardContainer.innerHTML = `
         <div class="cc-dashboard-empty">
-          <div class="cc-empty-icon">H</div>
-          <h2>Dashboard</h2>
+          <div class="cc-empty-icon">C</div>
+          <h2>Home</h2>
           <p>Unable to load dashboard: ${escapeHtml(err.message)}</p>
         </div>
       `;
@@ -392,9 +392,9 @@ function renderDashboard(blocks) {
   if (!blocks || blocks.length === 0) {
     dom.dashboardContainer.innerHTML = `
       <div class="cc-dashboard-empty">
-        <div class="cc-empty-icon">H</div>
-        <h2>Dashboard</h2>
-        <p>No dashboard content yet.</p>
+        <div class="cc-empty-icon">C</div>
+        <h2>Home</h2>
+        <p>No dashboard content yet. Captain will curate what needs your attention.</p>
       </div>
     `;
     return;
@@ -405,169 +405,207 @@ function renderDashboard(blocks) {
 
 function renderDashboardBlock(block) {
   switch (block.type) {
-    case 'hero':    return renderHeroBlock(block);
-    case 'stats':   return renderStatsBlock(block);
-    case 'alert':   return renderAlertBlock(block);
-    case 'activity': return renderActivityBlock(block);
-    case 'list':    return renderListBlock(block);
-    case 'section': return renderSectionBlock(block);
-    case 'agents':  return renderAgentsBlock(block);
-    default:        return '';
+    case 'brief':          return renderBriefBlock(block);
+    case 'attention':      return renderAttentionBlock(block);
+    case 'thread_waiting': return renderThreadWaitingBlock(block);
+    case 'recommendation': return renderRecommendationBlock(block);
+    case 'inflight':       return renderInflightBlock(block);
+    case 'shipped':        return renderShippedBlock(block);
+    case 'team_pulse':     return renderTeamPulseBlock(block);
+    case 'stats':          return renderStatsBlock(block);
+    default:               return '';
   }
 }
 
-function heroStatusColor(status) {
-  const colors = {
-    healthy: 'var(--cc-green)',
-    warning: 'var(--cc-yellow)',
-    critical: 'var(--cc-red)',
-    info: 'var(--cc-accent)',
-  };
-  return colors[status] || 'var(--cc-accent)';
-}
+// ── Brief Block (Captain's summary) ──────────────────────────────
 
-function renderHeroBlock(block) {
-  const color = heroStatusColor(block.status);
+function renderBriefBlock(block) {
+  const status = block.status || 'healthy';
+  const ts = block.timestamp ? new Date(block.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
   return `
-    <div class="cc-dash-hero" style="border-left-color: ${color}">
-      <div class="cc-dash-hero-status" style="color: ${color}">${escapeHtml(block.status || '')}</div>
-      <div class="cc-dash-hero-title">${escapeHtml(block.title || '')}</div>
-      ${block.subtitle ? `<div class="cc-dash-hero-subtitle">${escapeHtml(block.subtitle)}</div>` : ''}
+    <div class="cc-dash-brief cc-dash-brief-${escapeHtml(status)}">
+      <div class="cc-dash-brief-header">
+        <div class="cc-dash-brief-avatar cc-dash-brief-avatar-${escapeHtml(status)}">C</div>
+        <span class="cc-dash-brief-name">Captain</span>
+        ${ts ? `<span class="cc-dash-brief-time">${escapeHtml(ts)}</span>` : ''}
+      </div>
+      <div class="cc-dash-brief-body">${escapeHtml(block.message || '')}</div>
     </div>
   `;
 }
+
+// ── Attention Block (items needing user action) ──────────────────
+
+function renderAttentionBlock(block) {
+  const items = block.items || [];
+  const count = items.length;
+  const countClass = items.some(i => i.urgency === 'high' || i.category === 'blocked' || i.category === 'agent-issue') ? 'red' : 'yellow';
+
+  let html = `<div class="cc-dash-section-header">Needs Your Attention <span class="cc-dash-count cc-dash-count-${countClass}">${count}</span></div>`;
+
+  if (count === 0) {
+    html += `
+      <div class="cc-dash-empty-well">
+        <div class="cc-dash-empty-well-icon" style="color: var(--cc-green);">&#10003;</div>
+        <div class="cc-dash-empty-well-text">Nothing needs your attention right now</div>
+      </div>
+    `;
+    return html;
+  }
+
+  html += items.map(item => {
+    const urgency = item.urgency === 'high' ? 'urgent' : (item.category === 'blocked' || item.category === 'agent-issue' ? 'urgent' : 'warning');
+    const badgeClass = item.category || 'waiting';
+    const badgeLabel = (item.category || 'waiting').replace(/-/g, ' ');
+    const initial = (item.assignee || '?').charAt(0).toUpperCase();
+    return `
+      <div class="cc-dash-attention cc-dash-attention-${escapeHtml(urgency)}">
+        <div class="cc-dash-attention-top">
+          <span class="cc-dash-attention-badge cc-dash-badge-${escapeHtml(badgeClass)}">${escapeHtml(badgeLabel)}</span>
+          ${item.taskId ? `<span class="cc-dash-attention-task-id">${escapeHtml(item.taskId)}</span>` : ''}
+        </div>
+        <div class="cc-dash-attention-title">${escapeHtml(item.title || '')}</div>
+        ${item.context ? `<div class="cc-dash-attention-context">${escapeHtml(item.context)}</div>` : ''}
+        <div class="cc-dash-attention-meta">
+          ${item.assignee ? `<span class="cc-dash-attention-assignee"><span class="cc-dash-mini-avatar">${escapeHtml(initial)}</span> ${escapeHtml(item.assignee)}</span>` : ''}
+          ${item.age ? `<span class="cc-dash-attention-age">${escapeHtml(item.age)}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return html;
+}
+
+// ── Thread Waiting Block ─────────────────────────────────────────
+
+function renderThreadWaitingBlock(block) {
+  const items = block.items || [];
+  return items.map(item => `
+    <div class="cc-dash-thread-waiting">
+      <div class="cc-dash-thread-waiting-title">${escapeHtml(item.threadName || '')}</div>
+      ${item.preview ? `<div class="cc-dash-thread-waiting-preview">${escapeHtml(item.preview)}</div>` : ''}
+      <div class="cc-dash-thread-waiting-meta">
+        ${item.unread ? `<span>${escapeHtml(String(item.unread))} messages unread</span>` : ''}
+        ${item.age ? `<span>${escapeHtml(item.age)}</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Recommendation Block (Captain's advice) ──────────────────────
+
+function renderRecommendationBlock(block) {
+  return `
+    <div class="cc-dash-recommendation">
+      <div class="cc-dash-recommendation-label">Captain recommends</div>
+      <div class="cc-dash-recommendation-text">${escapeHtml(block.text || '')}</div>
+    </div>
+  `;
+}
+
+// ── Inflight Block (active tasks) ────────────────────────────────
+
+function renderInflightBlock(block) {
+  const items = block.items || [];
+  const title = block.title || 'In Flight';
+  const count = items.length;
+
+  let html = `<div class="cc-dash-section-header">${escapeHtml(title)} <span class="cc-dash-count cc-dash-count-blue">${count}</span></div>`;
+
+  html += items.map(item => {
+    const statusClass = item.status === 'review' ? 'review' : (item.status === 'qa' ? 'qa' : 'active');
+    return `
+      <div class="cc-dash-inflight">
+        <div class="cc-dash-inflight-dot cc-dash-inflight-dot-${escapeHtml(statusClass)}"></div>
+        <div class="cc-dash-inflight-info">
+          <div class="cc-dash-inflight-title">${escapeHtml(item.title || '')}</div>
+          ${item.note ? `<div class="cc-dash-inflight-note">${escapeHtml(item.note)}</div>` : ''}
+        </div>
+        ${item.agent ? `<div class="cc-dash-inflight-agent">${escapeHtml(item.agent)}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  return html;
+}
+
+// ── Shipped Block (completed items) ──────────────────────────────
+
+function renderShippedBlock(block) {
+  const items = block.items || [];
+  const title = block.title || 'Shipped';
+  const count = items.length;
+
+  let html = `<div class="cc-dash-section-header">${escapeHtml(title)} <span class="cc-dash-count cc-dash-count-green">${count}</span></div>`;
+
+  html += items.map(item => `
+    <div class="cc-dash-shipped">
+      <div class="cc-dash-shipped-check">&#10003;</div>
+      <div class="cc-dash-shipped-info">
+        <div class="cc-dash-shipped-title">${escapeHtml(item.title || '')}</div>
+        ${item.meta ? `<div class="cc-dash-shipped-meta">${escapeHtml(item.meta)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  return html;
+}
+
+// ── Team Pulse Block (agent grid) ────────────────────────────────
+
+function renderTeamPulseBlock(block) {
+  const agents = block.agents || [];
+  let html = `<div class="cc-dash-section-header">Team Pulse</div>`;
+
+  html += `<div class="cc-dash-team-pulse">`;
+  html += agents.map(agent => {
+    const initial = (agent.name || agent.id || '?').charAt(0).toUpperCase();
+    const dotClass = agent.status || 'offline';
+    return `
+      <div class="cc-dash-pulse-agent">
+        <div class="cc-dash-pulse-avatar">
+          ${escapeHtml(initial)}
+          <div class="cc-dash-pulse-dot cc-dash-pulse-dot-${escapeHtml(dotClass)}"></div>
+        </div>
+        <div class="cc-dash-pulse-info">
+          <div class="cc-dash-pulse-name">${escapeHtml(agent.name || agent.id || '')}</div>
+          ${agent.task ? `<div class="cc-dash-pulse-task">${escapeHtml(agent.task)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  html += `</div>`;
+
+  return html;
+}
+
+// ── Stats Block (week-in-review) ─────────────────────────────────
 
 function renderStatsBlock(block) {
   const items = block.items || [];
-  return `
-    <div class="cc-dash-stats">
-      ${items.map(item => {
-        const trend = item.trend;
-        let trendHtml = '';
-        if (trend === 'up') trendHtml = '<span class="cc-dash-stat-trend cc-trend-up">&#9650;</span>';
-        else if (trend === 'down') trendHtml = '<span class="cc-dash-stat-trend cc-trend-down">&#9660;</span>';
-        return `
-          <div class="cc-dash-stat-card">
-            <div class="cc-dash-stat-value">${escapeHtml(String(item.value ?? ''))}</div>
-            <div class="cc-dash-stat-label">${escapeHtml(item.label || '')}${trendHtml}</div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-  `;
-}
+  const title = block.title;
 
-function alertLevelColor(level) {
-  const colors = {
-    info: 'var(--cc-accent)',
-    warning: 'var(--cc-yellow)',
-    error: 'var(--cc-red)',
-  };
-  return colors[level] || 'var(--cc-accent)';
-}
+  let html = '';
+  if (title) html += `<div class="cc-dash-section-header">${escapeHtml(title)}</div>`;
 
-function alertLevelBg(level) {
-  const bgs = {
-    info: 'var(--cc-accent-bg)',
-    warning: 'var(--cc-yellow-bg)',
-    error: 'var(--cc-red-bg)',
-  };
-  return bgs[level] || 'var(--cc-accent-bg)';
-}
-
-function renderAlertBlock(block) {
-  const color = alertLevelColor(block.level);
-  const bg = alertLevelBg(block.level);
-  return `
-    <div class="cc-dash-alert" style="border-left-color: ${color}; background: ${bg}; color: ${color}">
-      ${block.title ? `<div class="cc-dash-alert-title">${escapeHtml(block.title)}</div>` : ''}
-      <div class="cc-dash-alert-message">${escapeHtml(block.message || '')}</div>
-    </div>
-  `;
-}
-
-function renderActivityBlock(block) {
-  const items = block.items || [];
-  return `
-    <div class="cc-dash-activity">
-      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
-      <div class="cc-dash-activity-list">
-        ${items.map(item => `
-          <div class="cc-dash-activity-item">
-            <span class="cc-dash-activity-dot"></span>
-            <span class="cc-dash-activity-text">${escapeHtml(item.text || '')}</span>
-            ${item.time ? `<span class="cc-dash-activity-time">${escapeHtml(item.time)}</span>` : ''}
-          </div>
-        `).join('')}
+  html += `<div class="cc-dash-stats">`;
+  html += items.map(item => {
+    const trend = item.trend;
+    let trendHtml = '';
+    if (trend === 'up') trendHtml = '<span class="cc-dash-stat-trend cc-trend-up">&#9650;</span>';
+    else if (trend === 'down') trendHtml = '<span class="cc-dash-stat-trend cc-trend-down">&#9660;</span>';
+    const valueColor = item.color ? `color: var(--cc-${escapeHtml(item.color)})` : '';
+    return `
+      <div class="cc-dash-stat-card">
+        <div class="cc-dash-stat-value" ${valueColor ? `style="${valueColor}"` : ''}>${escapeHtml(String(item.value ?? ''))}</div>
+        <div class="cc-dash-stat-label">${escapeHtml(item.label || '')}${trendHtml}</div>
       </div>
-    </div>
-  `;
-}
+    `;
+  }).join('');
+  html += `</div>`;
 
-function listItemStateBadge(state) {
-  if (!state) return '';
-  const stateClasses = {
-    created: 'grey', assigned: 'grey', in_progress: 'blue',
-    in_review: 'yellow', qa: 'yellow', blocked: 'red',
-    done: 'green', cancelled: 'grey',
-  };
-  const cls = stateClasses[state] || 'grey';
-  const label = state.replace(/_/g, ' ');
-  return `<span class="cc-task-badge cc-task-badge-${escapeHtml(cls)}">${escapeHtml(label)}</span>`;
-}
-
-function renderListBlock(block) {
-  const items = block.items || [];
-  return `
-    <div class="cc-dash-list">
-      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
-      <div class="cc-dash-list-items">
-        ${items.map(item => `
-          <div class="cc-dash-list-item">
-            <span class="cc-dash-list-item-text">${escapeHtml(item.text || item.title || '')}</span>
-            ${item.state ? listItemStateBadge(item.state) : ''}
-            ${item.assignee ? `<span class="cc-dash-list-assignee">${escapeHtml(item.assignee)}</span>` : ''}
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
-}
-
-function renderSectionBlock(block) {
-  const content = block.content || '';
-  return `
-    <div class="cc-dash-section">
-      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
-      <div class="cc-dash-section-body cc-markdown">${renderMarkdown(content)}</div>
-    </div>
-  `;
-}
-
-function renderAgentsBlock(block) {
-  const agents = block.agents || [];
-  return `
-    <div class="cc-dash-agents">
-      ${block.title ? `<div class="cc-dash-block-title">${escapeHtml(block.title)}</div>` : ''}
-      <div class="cc-dash-agents-grid">
-        ${agents.map(agent => {
-          const initial = (agent.name || agent.id || '?').charAt(0).toUpperCase();
-          const isOnline = agent.status === 'active' || agent.status === 'online';
-          const statusClass = isOnline ? 'cc-status-online' : 'cc-status-offline';
-          return `
-            <div class="cc-dash-agent-card">
-              <div class="cc-avatar cc-avatar-agent" style="width:32px;height:32px;font-size:13px;">${escapeHtml(initial)}</div>
-              <div class="cc-dash-agent-info">
-                <div class="cc-dash-agent-name">${escapeHtml(agent.name || agent.id || '')}</div>
-                ${agent.role ? `<div class="cc-dash-agent-role">${escapeHtml(agent.role)}</div>` : ''}
-              </div>
-              <span class="cc-status-dot ${statusClass}"></span>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    </div>
-  `;
+  return html;
 }
 
 // ── Docs Tab ────────────────────────────────────────────────────
