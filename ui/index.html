@@ -161,22 +161,25 @@
           <!-- Left: doc list sidebar -->
           <div id="docsSidebar" class="cc-docs-sidebar">
             <div class="cc-docs-sidebar-header">
-              <span class="cc-docs-sidebar-title">Design Docs</span>
+              <span class="cc-docs-sidebar-title">Docs &amp; Designs</span>
               <span id="docsCount" class="cc-badge cc-badge-sm"></span>
             </div>
-            <input id="docsSearch" class="cc-docs-search" type="text" placeholder="Filter docs..." autocomplete="off" />
+            <input id="docsSearch" class="cc-docs-search" type="text" placeholder="Filter docs &amp; designs..." autocomplete="off" />
             <div id="docsList" class="cc-docs-list"></div>
           </div>
-          <!-- Right: doc reader -->
+          <!-- Right: doc reader / design viewer -->
           <div id="docsReader" class="cc-docs-reader">
             <div id="docsEmptyState" class="cc-docs-empty">
-              <p>Select a document to read.</p>
+              <p>Select a document or design to view.</p>
             </div>
             <div id="docsReaderHeader" class="cc-docs-reader-header" style="display: none">
               <span id="docsReaderTitle" class="cc-docs-reader-title"></span>
               <span id="docsReaderAgent" class="cc-docs-reader-agent"></span>
+              <span id="docsReaderMeta" class="cc-docs-reader-meta"></span>
+              <button id="docsFullscreenBtn" class="cc-docs-fullscreen-btn" title="Toggle fullscreen" style="display: none">Fullscreen</button>
             </div>
             <div id="docsReaderContent" class="cc-docs-reader-content cc-markdown" style="display: none"></div>
+            <iframe id="docsDesignFrame" class="cc-docs-design-frame" sandbox="allow-same-origin" style="display: none"></iframe>
           </div>
         </div>
       </div>

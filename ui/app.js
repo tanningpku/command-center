@@ -583,39 +583,50 @@ async function loadDocsData() {
   state._docsItems = [];
   const headerEl = document.getElementById('docsReaderHeader');
   const contentEl = document.getElementById('docsReaderContent');
+  const frameEl = document.getElementById('docsDesignFrame');
   const emptyEl = document.getElementById('docsEmptyState');
+  const fullscreenBtn = document.getElementById('docsFullscreenBtn');
+  const metaEl = document.getElementById('docsReaderMeta');
   headerEl.style.display = 'none';
   contentEl.style.display = 'none';
+  frameEl.style.display = 'none';
   emptyEl.style.display = 'flex';
+  fullscreenBtn.style.display = 'none';
+  metaEl.textContent = '';
 
   const listEl = document.getElementById('docsList');
   const countEl = document.getElementById('docsCount');
-  listEl.innerHTML = `<div class="cc-loading">Loading docs...</div>`;
+  listEl.innerHTML = `<div class="cc-loading">Loading docs &amp; designs...</div>`;
   countEl.textContent = '';
 
   try {
     // Fetch all agents
     const agentData = await apiCall('/api/assistants');
-    if (state.selectedProjectId !== loadProjectId) return; // project changed
+    if (state.selectedProjectId !== loadProjectId) return;
     const agents = agentData.assistants || agentData || [];
 
-    // Fetch KB file lists for each agent in parallel
+    // Fetch KB file lists and design file lists for each agent in parallel
     const kbResults = await Promise.allSettled(
       agents.map(a => agentApiCall('/api/kb/list', a.id).then(d => ({ agentId: a.id, agentName: a.name || a.id, files: d.files || [] })))
     );
-    if (state.selectedProjectId !== loadProjectId) return; // project changed
+    const designResults = await Promise.allSettled(
+      agents.map(a => agentApiCall('/api/designs/list', a.id).then(d => ({ agentId: a.id, agentName: a.name || a.id, files: d.files || [] })).catch(() => ({ agentId: a.id, agentName: a.name || a.id, files: [] })))
+    );
+    if (state.selectedProjectId !== loadProjectId) return;
 
-    // Also fetch captain KB
+    // Also fetch captain KB and designs
     const captainResult = await apiCall('/api/kb/list?agent=captain').catch(() => ({ files: [] }));
-    if (state.selectedProjectId !== loadProjectId) return; // project changed
+    const captainDesigns = await apiCall('/api/designs/list?agent=captain').catch(() => ({ files: [] }));
+    if (state.selectedProjectId !== loadProjectId) return;
     const captainFiles = (captainResult.files || []).filter(f => !DOCS_SYSTEM_FILES.includes(f));
+    const captainDesignFiles = captainDesigns.files || [];
 
-    // Aggregate all docs, filtering out system files
-    const allDocs = [];
+    // Aggregate all items with type flag
+    const allItems = [];
 
     // Captain docs
     captainFiles.forEach(file => {
-      allDocs.push({ file, agentId: 'captain', agentName: 'Captain' });
+      allItems.push({ file, agentId: 'captain', agentName: 'Captain', type: 'doc' });
     });
 
     // Agent docs
@@ -625,15 +636,31 @@ async function loadDocsData() {
       files
         .filter(f => !DOCS_SYSTEM_FILES.includes(f))
         .forEach(file => {
-          // Avoid duplicates from captain
           if (agentId === 'captain') return;
-          allDocs.push({ file, agentId, agentName });
+          allItems.push({ file, agentId, agentName, type: 'doc' });
         });
     });
 
-    state._docsItems = allDocs;
-    countEl.textContent = allDocs.length;
-    renderDocsList(allDocs);
+    // Captain designs
+    captainDesignFiles.forEach(d => {
+      const file = typeof d === 'string' ? d : d.name;
+      allItems.push({ file, agentId: 'captain', agentName: 'Captain', type: 'design', size: d.size, modified: d.modified });
+    });
+
+    // Agent designs
+    designResults.forEach(result => {
+      if (result.status !== 'fulfilled') return;
+      const { agentId, agentName, files } = result.value;
+      files.forEach(d => {
+        if (agentId === 'captain') return;
+        const file = typeof d === 'string' ? d : d.name;
+        allItems.push({ file, agentId, agentName, type: 'design', size: d.size, modified: d.modified });
+      });
+    });
+
+    state._docsItems = allItems;
+    countEl.textContent = allItems.length;
+    renderDocsList(allItems);
 
     // Bind search filter
     const searchEl = document.getElementById('docsSearch');
@@ -643,7 +670,7 @@ async function loadDocsData() {
         renderDocsList(state._docsItems);
       } else {
         renderDocsList(state._docsItems.filter(d =>
-          d.file.toLowerCase().includes(q) || d.agentName.toLowerCase().includes(q)
+          d.file.toLowerCase().includes(q) || d.agentName.toLowerCase().includes(q) || d.type.includes(q)
         ));
       }
     };
@@ -660,27 +687,90 @@ function docTitle(filename) {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function renderDocsList(docs) {
+function renderDocsList(items) {
   const listEl = document.getElementById('docsList');
-  if (!docs || docs.length === 0) {
-    listEl.innerHTML = `<div class="cc-docs-sidebar-empty">No design docs found.</div>`;
+  if (!items || items.length === 0) {
+    listEl.innerHTML = `<div class="cc-docs-sidebar-empty">No docs or designs found.</div>`;
     return;
   }
 
-  listEl.innerHTML = docs.map(doc => `
-    <div class="cc-doc-card ${state._activeDocKey === doc.agentId + ':' + doc.file ? 'cc-doc-card-active' : ''}"
-         data-doc-file="${escapeHtml(doc.file)}" data-doc-agent="${escapeHtml(doc.agentId)}">
-      <div class="cc-doc-card-title">${escapeHtml(docTitle(doc.file))}</div>
-      <div class="cc-doc-card-meta">${escapeHtml(doc.agentName)} &middot; ${escapeHtml(doc.file)}</div>
-    </div>
-  `).join('');
+  const docs = items.filter(d => d.type === 'doc');
+  const designs = items.filter(d => d.type === 'design');
 
-  // Bind click handlers
+  let html = '';
+
+  // Docs section
+  if (docs.length > 0) {
+    html += `<div class="cc-docs-section-header" data-section="docs">
+      <span class="cc-docs-section-arrow">&#9662;</span>
+      <span class="cc-docs-section-label">Docs</span>
+      <span class="cc-badge cc-badge-sm">${docs.length}</span>
+    </div>`;
+    html += `<div class="cc-docs-section-items" data-section="docs">`;
+    html += docs.map(doc => `
+      <div class="cc-doc-card ${state._activeDocKey === doc.agentId + ':' + doc.file ? 'cc-doc-card-active' : ''}"
+           data-doc-file="${escapeHtml(doc.file)}" data-doc-agent="${escapeHtml(doc.agentId)}" data-doc-type="doc">
+        <div class="cc-doc-card-title">${escapeHtml(docTitle(doc.file))}</div>
+        <div class="cc-doc-card-meta">${escapeHtml(doc.agentName)} &middot; ${escapeHtml(doc.file)}</div>
+      </div>
+    `).join('');
+    html += `</div>`;
+  }
+
+  // Designs section
+  if (designs.length > 0) {
+    html += `<div class="cc-docs-section-header" data-section="designs">
+      <span class="cc-docs-section-arrow">&#9662;</span>
+      <span class="cc-docs-section-label">Designs</span>
+      <span class="cc-badge cc-badge-sm">${designs.length}</span>
+    </div>`;
+    html += `<div class="cc-docs-section-items" data-section="designs">`;
+    html += designs.map(doc => {
+      const modStr = doc.modified ? new Date(doc.modified).toLocaleDateString() : '';
+      return `
+        <div class="cc-doc-card ${state._activeDocKey === doc.agentId + ':' + doc.file ? 'cc-doc-card-active' : ''}"
+             data-doc-file="${escapeHtml(doc.file)}" data-doc-agent="${escapeHtml(doc.agentId)}" data-doc-type="design">
+          <div class="cc-doc-card-title">
+            <span class="cc-doc-type-badge cc-doc-type-design">HTML</span>
+            ${escapeHtml(docTitle(doc.file))}
+          </div>
+          <div class="cc-doc-card-meta">${escapeHtml(doc.agentName)}${modStr ? ' &middot; ' + escapeHtml(modStr) : ''}</div>
+        </div>
+      `;
+    }).join('');
+    html += `</div>`;
+  }
+
+  listEl.innerHTML = html;
+
+  // Bind section toggle handlers
+  listEl.querySelectorAll('.cc-docs-section-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const section = header.dataset.section;
+      const itemsEl = listEl.querySelector(`.cc-docs-section-items[data-section="${section}"]`);
+      const arrow = header.querySelector('.cc-docs-section-arrow');
+      if (itemsEl.style.display === 'none') {
+        itemsEl.style.display = '';
+        arrow.innerHTML = '&#9662;';
+      } else {
+        itemsEl.style.display = 'none';
+        arrow.innerHTML = '&#9656;';
+      }
+    });
+  });
+
+  // Bind click handlers on cards
   listEl.querySelectorAll('.cc-doc-card').forEach(card => {
     card.addEventListener('click', () => {
       const file = card.dataset.docFile;
       const agentId = card.dataset.docAgent;
-      openDoc(file, agentId, docs.find(d => d.file === file && d.agentId === agentId));
+      const type = card.dataset.docType;
+      const item = items.find(d => d.file === file && d.agentId === agentId && d.type === type);
+      if (type === 'design') {
+        openDesign(file, agentId, item);
+      } else {
+        openDoc(file, agentId, item);
+      }
     });
   });
 }
@@ -688,34 +778,118 @@ function renderDocsList(docs) {
 async function openDoc(file, agentId, docMeta) {
   const headerEl = document.getElementById('docsReaderHeader');
   const contentEl = document.getElementById('docsReaderContent');
+  const frameEl = document.getElementById('docsDesignFrame');
   const emptyEl = document.getElementById('docsEmptyState');
   const titleEl = document.getElementById('docsReaderTitle');
   const agentEl = document.getElementById('docsReaderAgent');
+  const metaEl = document.getElementById('docsReaderMeta');
+  const fullscreenBtn = document.getElementById('docsFullscreenBtn');
 
   const docKey = agentId + ':' + file;
   state._activeDocKey = docKey;
 
   // Update active card styling
   document.querySelectorAll('.cc-doc-card').forEach(c => c.classList.remove('cc-doc-card-active'));
-  const active = document.querySelector(`.cc-doc-card[data-doc-file="${CSS.escape(file)}"][data-doc-agent="${CSS.escape(agentId)}"]`);
+  const active = document.querySelector(`.cc-doc-card[data-doc-file="${CSS.escape(file)}"][data-doc-agent="${CSS.escape(agentId)}"][data-doc-type="doc"]`);
   if (active) active.classList.add('cc-doc-card-active');
 
-  // Show header and loading state
+  // Show markdown reader, hide design iframe
   emptyEl.style.display = 'none';
   headerEl.style.display = 'flex';
   contentEl.style.display = 'block';
+  frameEl.style.display = 'none';
+  fullscreenBtn.style.display = 'none';
+  metaEl.textContent = '';
   titleEl.textContent = docTitle(file);
   agentEl.textContent = docMeta ? docMeta.agentName : agentId;
   contentEl.innerHTML = `<div class="cc-loading">Loading...</div>`;
 
   try {
     const data = await agentApiCall(`/api/kb/read?file=${encodeURIComponent(file)}`, agentId);
-    if (state._activeDocKey !== docKey) return; // user opened a different doc
+    if (state._activeDocKey !== docKey) return;
     contentEl.innerHTML = renderMarkdown(data.content || '');
   } catch (err) {
     if (state._activeDocKey !== docKey) return;
     contentEl.innerHTML = `<div class="cc-docs-error">Failed to load document: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+async function openDesign(file, agentId, designMeta) {
+  const headerEl = document.getElementById('docsReaderHeader');
+  const contentEl = document.getElementById('docsReaderContent');
+  const frameEl = document.getElementById('docsDesignFrame');
+  const emptyEl = document.getElementById('docsEmptyState');
+  const titleEl = document.getElementById('docsReaderTitle');
+  const agentEl = document.getElementById('docsReaderAgent');
+  const metaEl = document.getElementById('docsReaderMeta');
+  const fullscreenBtn = document.getElementById('docsFullscreenBtn');
+
+  const docKey = agentId + ':' + file;
+  state._activeDocKey = docKey;
+
+  // Update active card styling
+  document.querySelectorAll('.cc-doc-card').forEach(c => c.classList.remove('cc-doc-card-active'));
+  const active = document.querySelector(`.cc-doc-card[data-doc-file="${CSS.escape(file)}"][data-doc-agent="${CSS.escape(agentId)}"][data-doc-type="design"]`);
+  if (active) active.classList.add('cc-doc-card-active');
+
+  // Show iframe, hide markdown reader
+  emptyEl.style.display = 'none';
+  headerEl.style.display = 'flex';
+  contentEl.style.display = 'none';
+  frameEl.style.display = 'block';
+  fullscreenBtn.style.display = 'inline-block';
+  titleEl.textContent = docTitle(file);
+  agentEl.textContent = designMeta ? designMeta.agentName : agentId;
+
+  // Show metadata (modified date, size)
+  const parts = [];
+  if (designMeta && designMeta.modified) {
+    parts.push(new Date(designMeta.modified).toLocaleString());
+  }
+  if (designMeta && designMeta.size) {
+    const kb = (designMeta.size / 1024).toFixed(1);
+    parts.push(`${kb} KB`);
+  }
+  metaEl.textContent = parts.join(' · ');
+
+  // Show loading in iframe
+  frameEl.srcdoc = '<div style="padding:20px;color:#888;font-family:system-ui;">Loading design...</div>';
+
+  try {
+    const data = await agentApiCall(`/api/designs/read?file=${encodeURIComponent(file)}`, agentId);
+    if (state._activeDocKey !== docKey) return;
+    frameEl.srcdoc = data.content || '';
+  } catch (err) {
+    if (state._activeDocKey !== docKey) return;
+    frameEl.srcdoc = `<div style="padding:20px;color:#e74c3c;font-family:system-ui;">Failed to load design: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Fullscreen toggle for design iframe
+document.getElementById('docsFullscreenBtn').addEventListener('click', () => {
+  const reader = document.getElementById('docsReader');
+  reader.classList.toggle('cc-docs-reader-fullscreen');
+  const btn = document.getElementById('docsFullscreenBtn');
+  btn.textContent = reader.classList.contains('cc-docs-reader-fullscreen') ? 'Exit' : 'Fullscreen';
+});
+
+// Navigate to a design from external link (e.g. task card)
+function navigateToDesign(agentId, file) {
+  showTab('docs');
+  // Wait for docs to load, then open the design
+  const tryOpen = () => {
+    const item = (state._docsItems || []).find(d => d.agentId === agentId && d.file === file && d.type === 'design');
+    if (item) {
+      openDesign(file, agentId, item);
+    } else {
+      // Data might still be loading; retry once after a brief delay
+      setTimeout(() => {
+        const item2 = (state._docsItems || []).find(d => d.agentId === agentId && d.file === file && d.type === 'design');
+        if (item2) openDesign(file, agentId, item2);
+      }, 500);
+    }
+  };
+  tryOpen();
 }
 
 // ── Team Tab ─────────────────────────────────────────────────────
@@ -1292,6 +1466,13 @@ function renderTaskCard(task) {
     `<span class="cc-board-label">${escapeHtml(label)}</span>`
   ).join('');
 
+  // Linked design docs (array of "agentId:filename" strings)
+  const designDocsHtml = (task.designDocs || task.design_docs || []).map(ref => {
+    const [agent, ...fileParts] = ref.split(':');
+    const file = fileParts.join(':');
+    return `<span class="cc-task-design-link" data-design-agent="${escapeHtml(agent)}" data-design-file="${escapeHtml(file)}" title="View design: ${escapeHtml(file)}">${escapeHtml(docTitle(file))}</span>`;
+  }).join('');
+
   const threadId = task.threadId || '';
   return `
     <div class="cc-board-card${threadId ? ' cc-board-card-clickable' : ''}" draggable="true" data-task-id="${escapeHtml(task.id)}" ${threadId ? `data-thread-id="${escapeHtml(threadId)}"` : ''}>
@@ -1305,6 +1486,7 @@ function renderTaskCard(task) {
         ${escapeHtml(stateLabel)}
       </div>
       ${labelsHtml ? `<div class="cc-board-card-labels">${labelsHtml}</div>` : ''}
+      ${designDocsHtml ? `<div class="cc-board-card-designs">${designDocsHtml}</div>` : ''}
       ${assigneeHtml ? `<div class="cc-board-card-footer">${assigneeHtml}</div>` : ''}
     </div>
   `;
@@ -2693,6 +2875,16 @@ document.getElementById('boardFilterClear').addEventListener('click', () => {
 
 // Board card click — navigate to task thread, or paginate Done column
 document.getElementById('boardColumns').addEventListener('click', (e) => {
+  // Handle design doc links on task cards
+  const designLink = e.target.closest('.cc-task-design-link');
+  if (designLink) {
+    e.stopPropagation();
+    const agent = designLink.dataset.designAgent;
+    const file = designLink.dataset.designFile;
+    if (agent && file) navigateToDesign(agent, file);
+    return;
+  }
+
   // Handle prev/next pagination in Done column
   const pageBtn = e.target.closest('.cc-board-page-btn');
   if (pageBtn && !pageBtn.disabled) {

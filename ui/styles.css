@@ -2930,6 +2930,122 @@ body {
   font-size: 13px;
 }
 
+/* Docs sidebar section headers */
+.cc-docs-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cc-docs-section-header:hover {
+  background: var(--cc-surface-hover);
+  border-radius: var(--cc-radius-sm);
+}
+
+.cc-docs-section-arrow {
+  font-size: 10px;
+  color: var(--cc-text-faint);
+  width: 12px;
+  text-align: center;
+}
+
+.cc-docs-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cc-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Design type badge on sidebar cards */
+.cc-doc-type-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cc-doc-type-design {
+  background: var(--cc-accent-bg);
+  color: var(--cc-accent);
+}
+
+/* Design iframe viewer */
+.cc-docs-design-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* Reader metadata (modified, size) */
+.cc-docs-reader-meta {
+  font-size: 11px;
+  color: var(--cc-text-faint);
+  margin-left: auto;
+}
+
+/* Fullscreen toggle button */
+.cc-docs-fullscreen-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-sm);
+  background: var(--cc-surface);
+  color: var(--cc-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cc-docs-fullscreen-btn:hover {
+  background: var(--cc-surface-hover);
+  color: var(--cc-text);
+}
+
+/* Fullscreen mode for reader */
+.cc-docs-reader-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: var(--cc-bg);
+}
+
+/* Design links on task cards */
+.cc-board-card-designs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.cc-task-design-link {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--cc-accent-bg);
+  color: var(--cc-accent);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cc-task-design-link:hover {
+  background: var(--cc-accent);
+  color: #fff;
+}
+
 /* ── Health Tab ─────────────────────────────────────────────────── */
 
 .cc-health {
