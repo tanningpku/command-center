@@ -575,7 +575,16 @@ function renderAgentsBlock(block) {
 const DOCS_SYSTEM_FILES = ['identity.md', 'tools.md'];
 
 async function loadDocsData() {
-  if (!state.selectedProjectId) return;
+  if (!state.selectedProjectId) { state._docsLoadPromise = null; return; }
+  // Store the promise so navigateToDesign can await it
+  if (!state._docsLoadPromise || state._docsLoadDone) {
+    state._docsLoadDone = false;
+    state._docsLoadPromise = _loadDocsDataInner();
+  }
+  return state._docsLoadPromise;
+}
+
+async function _loadDocsDataInner() {
   const loadProjectId = state.selectedProjectId;
 
   // Reset reader state to avoid showing stale content from a different project
@@ -674,7 +683,9 @@ async function loadDocsData() {
         ));
       }
     };
+    state._docsLoadDone = true;
   } catch (err) {
+    state._docsLoadDone = true;
     console.error('Failed to load docs:', err);
     listEl.innerHTML = `<div class="cc-docs-sidebar-empty">Unable to load docs: ${escapeHtml(err.message)}</div>`;
   }
@@ -793,13 +804,15 @@ async function openDoc(file, agentId, docMeta) {
   const active = document.querySelector(`.cc-doc-card[data-doc-file="${CSS.escape(file)}"][data-doc-agent="${CSS.escape(agentId)}"][data-doc-type="doc"]`);
   if (active) active.classList.add('cc-doc-card-active');
 
-  // Show markdown reader, hide design iframe
+  // Show markdown reader, hide design iframe, clear fullscreen
   emptyEl.style.display = 'none';
   headerEl.style.display = 'flex';
   contentEl.style.display = 'block';
   frameEl.style.display = 'none';
   fullscreenBtn.style.display = 'none';
   metaEl.textContent = '';
+  document.getElementById('docsReader').classList.remove('cc-docs-reader-fullscreen');
+  fullscreenBtn.textContent = 'Fullscreen';
   titleEl.textContent = docTitle(file);
   agentEl.textContent = docMeta ? docMeta.agentName : agentId;
   contentEl.innerHTML = `<div class="cc-loading">Loading...</div>`;
@@ -874,22 +887,14 @@ document.getElementById('docsFullscreenBtn').addEventListener('click', () => {
 });
 
 // Navigate to a design from external link (e.g. task card)
-function navigateToDesign(agentId, file) {
+async function navigateToDesign(agentId, file) {
   showTab('docs');
-  // Wait for docs to load, then open the design
-  const tryOpen = () => {
-    const item = (state._docsItems || []).find(d => d.agentId === agentId && d.file === file && d.type === 'design');
-    if (item) {
-      openDesign(file, agentId, item);
-    } else {
-      // Data might still be loading; retry once after a brief delay
-      setTimeout(() => {
-        const item2 = (state._docsItems || []).find(d => d.agentId === agentId && d.file === file && d.type === 'design');
-        if (item2) openDesign(file, agentId, item2);
-      }, 500);
-    }
-  };
-  tryOpen();
+  // Wait for docs data to finish loading, then open the design
+  await loadDocsData();
+  const item = (state._docsItems || []).find(d => d.agentId === agentId && d.file === file && d.type === 'design');
+  if (item) {
+    openDesign(file, agentId, item);
+  }
 }
 
 // ── Team Tab ─────────────────────────────────────────────────────
