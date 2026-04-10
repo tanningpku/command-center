@@ -70,7 +70,7 @@ case "${1:-help}" in
         ;;
       update)
         shift 2
-        ID="" STATE="" NOTE="" ASSIGNEE="" PR=""
+        ID="" STATE="" NOTE="" ASSIGNEE="" PR="" DESIGN_DOCS=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
             --id) ID="$2"; shift 2;;
@@ -78,6 +78,7 @@ case "${1:-help}" in
             --note) NOTE="$2"; shift 2;;
             --assignee) ASSIGNEE="$2"; shift 2;;
             --pr) PR="$2"; shift 2;;
+            --design-docs) DESIGN_DOCS="$2"; shift 2;;
             *) shift;;
           esac
         done
@@ -87,6 +88,18 @@ case "${1:-help}" in
         [ -n "$NOTE" ] && BODY="$BODY,\"latestUpdate\":\"$NOTE\""
         [ -n "$ASSIGNEE" ] && BODY="$BODY,\"assignee\":\"$ASSIGNEE\""
         [ -n "$PR" ] && BODY="$BODY,\"githubPR\":$PR"
+        if [ -n "$DESIGN_DOCS" ]; then
+          # Convert comma-separated list to JSON array
+          JSON_ARR="["; FIRST=true
+          IFS=',' read -ra DOCS <<< "$DESIGN_DOCS"
+          for doc in "${DOCS[@]}"; do
+            doc="$(echo "$doc" | xargs)"
+            [ "$FIRST" = true ] && FIRST=false || JSON_ARR="$JSON_ARR,"
+            JSON_ARR="$JSON_ARR\"$doc\""
+          done
+          JSON_ARR="$JSON_ARR]"
+          BODY="$BODY,\"designDocs\":$JSON_ARR"
+        fi
         BODY="$BODY}"
         json_patch "/api/tasks/$ID" "$BODY"
         ;;

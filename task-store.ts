@@ -22,6 +22,7 @@ export interface Task {
   state: TaskState;
   assignee?: string;
   collaborators: string[];
+  designDocs: string[];
   createdBy: string;
   priority: "critical" | "high" | "normal" | "low";
   labels: string[];
@@ -64,6 +65,10 @@ export class TaskStore {
     try {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN collaborators TEXT`);
     } catch { /* column already exists */ }
+    // Migration: add design_docs column if missing
+    try {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN design_docs TEXT`);
+    } catch { /* column already exists */ }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS task_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,15 +88,16 @@ export class TaskStore {
     }
   }
 
-  create(opts: { title: string; description?: string; githubIssue?: number; priority?: string; labels?: string[]; createdBy: string; assignee?: string; collaborators?: string[] }): Task {
+  create(opts: { title: string; description?: string; githubIssue?: number; priority?: string; labels?: string[]; createdBy: string; assignee?: string; collaborators?: string[]; designDocs?: string[] }): Task {
     const id = `T-${this.nextNum++}`;
     const now = new Date().toISOString();
     this.db.prepare(
-      `INSERT INTO tasks (id, title, description, github_issue, state, assignee, collaborators, created_by, priority, labels, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, title, description, github_issue, state, assignee, collaborators, design_docs, created_by, priority, labels, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, opts.title, opts.description ?? null, opts.githubIssue ?? null,
       opts.assignee ? "assigned" : "created", opts.assignee ?? null,
       opts.collaborators?.length ? JSON.stringify(opts.collaborators) : null,
+      opts.designDocs?.length ? JSON.stringify(opts.designDocs) : null,
       opts.createdBy, opts.priority ?? "normal", JSON.stringify(opts.labels ?? []), now, now);
     this.recordEvent(id, null, opts.assignee ? "assigned" : "created", opts.createdBy);
     return this.get(id)!;
@@ -137,7 +143,7 @@ export class TaskStore {
 
   private static readonly VALID_STATES = new Set<TaskState>(["created", "assigned", "in_progress", "in_review", "qa", "blocked", "done", "cancelled"]);
 
-  update(id: string, opts: Partial<{ state: TaskState; assignee: string; collaborators: string[]; githubPR: number; latestUpdate: string; priority: string; labels: string[]; threadId: string }>, actor: string): Task {
+  update(id: string, opts: Partial<{ state: TaskState; assignee: string; collaborators: string[]; designDocs: string[]; githubPR: number; latestUpdate: string; priority: string; labels: string[]; threadId: string }>, actor: string): Task {
     const task = this.get(id);
     if (!task) throw new Error(`Task not found: ${id}`);
     if (opts.state && !TaskStore.VALID_STATES.has(opts.state)) {
@@ -151,6 +157,7 @@ export class TaskStore {
     if (opts.latestUpdate !== undefined) { sets.push("latest_update = ?"); params.push(opts.latestUpdate); }
     if (opts.priority) { sets.push("priority = ?"); params.push(opts.priority); }
     if (opts.collaborators) { sets.push("collaborators = ?"); params.push(JSON.stringify(opts.collaborators)); }
+    if (opts.designDocs) { sets.push("design_docs = ?"); params.push(JSON.stringify(opts.designDocs)); }
     if (opts.labels) { sets.push("labels = ?"); params.push(JSON.stringify(opts.labels)); }
     if (opts.threadId !== undefined) { sets.push("thread_id = ?"); params.push(opts.threadId); }
     params.push(id);
@@ -174,6 +181,7 @@ export class TaskStore {
       githubIssue: row.github_issue ?? undefined, githubPR: row.github_pr ?? undefined,
       state: row.state, assignee: row.assignee ?? undefined,
       collaborators: row.collaborators ? JSON.parse(row.collaborators) : [],
+      designDocs: row.design_docs ? JSON.parse(row.design_docs) : [],
       createdBy: row.created_by,
       priority: row.priority, labels: row.labels ? JSON.parse(row.labels) : [],
       threadId: row.thread_id ?? undefined, latestUpdate: row.latest_update ?? undefined,
