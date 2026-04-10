@@ -27,12 +27,12 @@ class HomeStore {
                 updatedAt = dashboard.updatedAt
             } else {
                 // Fallback: compose blocks client-side from raw data
-                await loadFallback()
+                try await loadFallback()
             }
         } catch {
             // Dashboard endpoint failed — try fallback
             do {
-                await loadFallback()
+                try await loadFallback()
             } catch let fallbackError {
                 if let apiError = fallbackError as? APIError {
                     self.error = apiError.errorDescription
