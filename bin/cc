@@ -437,7 +437,7 @@ case "${1:-help}" in
           esac
         done
         [ -z "$FILE" ] && echo "Error: --file is required" && exit 2
-        json_get "/api/designs/read?file=$FILE"
+        json_get "/api/designs/read?file=$(urlencode "$FILE")"
         ;;
       write)
         shift 2
