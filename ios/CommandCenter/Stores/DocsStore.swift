@@ -144,16 +144,15 @@ class DocsStore {
         selectedDoc = doc
         docContent = nil
         isLoadingContent = true
+        defer { if selectedDoc == requestedDoc { isLoadingContent = false } }
         do {
             let response = try await api.fetchKBRead(agentId: doc.agentId, fileName: doc.fileName)
-            // Guard against race: only update if this is still the selected doc
             guard selectedDoc == requestedDoc else { return }
             docContent = response.content
         } catch {
             guard selectedDoc == requestedDoc else { return }
             docContent = "Error loading document: \(error.localizedDescription)"
         }
-        isLoadingContent = false
     }
 }
 
