@@ -78,8 +78,8 @@ struct ScreenshotShareView: View {
                         .padding()
                     }
                 } else {
-                    ContentUnavailableView("No Screenshot", systemImage: "photo",
-                        description: Text("Could not retrieve the screenshot. Make sure photo library access is enabled."))
+                    ContentUnavailableView("Screenshot Not Ready", systemImage: "photo",
+                        description: Text("The screenshot hasn't been saved to the photo library yet. Dismiss the screenshot preview first, then try again."))
                 }
             }
             .navigationTitle("Share Screenshot")
@@ -144,13 +144,16 @@ struct ScreenshotShareView: View {
             return
         }
 
-        // Retry up to 5 times to wait for the new screenshot to appear in the photo library
-        let maxRetries = 5
+        // Retry up to 15 times to wait for the new screenshot to appear in the photo library.
+        // On modern iOS, screenshots aren't saved immediately — a preview thumbnail appears
+        // first, and the photo is saved to the library only after it auto-dismisses (~5s).
+        // Total polling window: 15 × 600ms = 9s (starting after the 1.5s initial delay).
+        let maxRetries = 15
         for attempt in 0..<maxRetries {
             let asset = fetchLatestScreenshotAsset()
             guard let asset else {
                 if attempt < maxRetries - 1 {
-                    try? await Task.sleep(for: .milliseconds(500))
+                    try? await Task.sleep(for: .milliseconds(600))
                     continue
                 }
                 return
@@ -165,21 +168,19 @@ struct ScreenshotShareView: View {
 
             // Screenshot is older than our trigger — wait and retry
             if attempt < maxRetries - 1 {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .milliseconds(600))
             }
         }
 
-        // Fallback: use whatever the latest screenshot is
-        if let asset = fetchLatestScreenshotAsset() {
-            screenshotImage = await loadImage(from: asset)
-        }
+        // No fallback — don't show a stale (previous) screenshot.
+        // screenshotImage stays nil, which shows the "No Screenshot" state.
     }
 
     private func fetchLatestScreenshotAsset() -> PHAsset? {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.fetchLimit = 1
-        options.predicate = NSPredicate(format: "mediaSubtypes == %d", PHAssetMediaSubtype.photoScreenshot.rawValue)
+        options.predicate = NSPredicate(format: "(mediaSubtypes & %d) != 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
         return PHAsset.fetchAssets(with: .image, options: options).firstObject
     }
 
