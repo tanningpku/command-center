@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Fetches tasks, agents, and threads, then composes dashboard blocks client-side.
+/// Captain-driven dashboard — fetches curated blocks from GET /api/dashboard,
+/// falls back to client-side composition if the dashboard is empty.
 @MainActor
 @Observable
 class HomeStore {
@@ -19,27 +20,46 @@ class HomeStore {
         isLoading = true
         error = nil
         do {
-            async let tasksReq = api.fetchTasks()
-            async let agentsReq = api.fetchAgents()
-            async let threadsReq = api.fetchThreads()
-
-            let (tasksResp, agentsResp, threadsResp) = try await (tasksReq, agentsReq, threadsReq)
-
-            blocks = buildBlocks(
-                tasks: tasksResp.tasks,
-                agents: agentsResp.agents,
-                threads: threadsResp.threads
-            )
-            updatedAt = ISO8601DateFormatter().string(from: Date())
-        } catch let apiError as APIError {
-            self.error = apiError.errorDescription
+            // Try captain-driven dashboard first
+            let dashboard = try await api.fetchDashboard()
+            if let captainBlocks = dashboard.blocks, !captainBlocks.isEmpty {
+                blocks = captainBlocks
+                updatedAt = dashboard.updatedAt
+            } else {
+                // Fallback: compose blocks client-side from raw data
+                try await loadFallback()
+            }
         } catch {
-            self.error = error.localizedDescription
+            // Dashboard endpoint failed — try fallback
+            do {
+                try await loadFallback()
+            } catch let fallbackError {
+                if let apiError = fallbackError as? APIError {
+                    self.error = apiError.errorDescription
+                } else {
+                    self.error = fallbackError.localizedDescription
+                }
+            }
         }
         isLoading = false
     }
 
-    // MARK: - Block composition
+    private func loadFallback() async throws {
+        async let tasksReq = api.fetchTasks()
+        async let agentsReq = api.fetchAgents()
+        async let threadsReq = api.fetchThreads()
+
+        let (tasksResp, agentsResp, threadsResp) = try await (tasksReq, agentsReq, threadsReq)
+
+        blocks = buildBlocks(
+            tasks: tasksResp.tasks,
+            agents: agentsResp.agents,
+            threads: threadsResp.threads
+        )
+        updatedAt = ISO8601DateFormatter().string(from: Date())
+    }
+
+    // MARK: - Fallback block composition
 
     private func buildBlocks(tasks: [CCTask], agents: [CCAgent], threads: [CCThread]) -> [DashboardBlock] {
         var result: [DashboardBlock] = []

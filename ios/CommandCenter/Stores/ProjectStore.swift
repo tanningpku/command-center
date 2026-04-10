@@ -74,4 +74,5 @@ class ProjectStore {
 
 extension Notification.Name {
     static let projectChanged = Notification.Name("projectChanged")
+    static let dashboardUpdated = Notification.Name("dashboardUpdated")
 }
