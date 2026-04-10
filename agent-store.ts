@@ -85,6 +85,10 @@ export class AgentStore {
     return path.join(this.dataDir, "agents", agentId, "kb");
   }
 
+  getDesignsDir(agentId: string): string {
+    return path.join(this.dataDir, "agents", agentId, "designs");
+  }
+
   private scaffoldKB(agentId: string, name: string, role: string, isCaptain: boolean): void {
     const kbDir = this.getKBDir(agentId);
     fs.mkdirSync(kbDir, { recursive: true });
@@ -231,6 +235,15 @@ Example: a feature needs a new API endpoint (backend) and a new screen (iOS):
 - Stale work (3+ days) → ping the agent in their thread
 - Cross-cutting work → create a shared multi-agent thread (see above), not separate threads
 - Tempted to write code? Stop. Create a task instead.
+
+## Design-First Workflow
+For projects with a UI component, create a **Designer** agent to own visual design:
+1. When the project has web UI or mobile UI, spin up a Designer agent during first boot or when UI work begins
+2. Before implementing any UI feature, create a design task first — the Designer creates HTML/CSS mockups
+3. Mockups are stored via /api/designs/* endpoints and linked to tasks via the design_docs field
+4. User reviews mockups in the Docs tab, gives feedback, Designer iterates
+5. Once approved, create the implementation task referencing the approved design
+6. The Designer agent role: "Owns visual design: creates HTML/CSS mockups, iterates on designs with user feedback, and hands off approved designs for implementation."
 
 ## CRITICAL: How to Communicate
 **You MUST use \`cc msg send\` for ALL messages.** Your raw text output is NOT visible to anyone — not the human, not other agents. The ONLY way to communicate is:

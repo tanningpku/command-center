@@ -21,6 +21,7 @@ import { ThreadStore } from "./thread-store.js";
 import { ClaudeBridge, killStaleClaude, type AssistantTextPayload, type ResultPayload } from "./claude-bridge.js";
 import { SseHub } from "./sse-hub.js";
 import { KbManager } from "./kb-manager.js";
+import { DesignManager } from "./design-manager.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -90,6 +91,7 @@ export class Gateway {
   private readonly agentStores: Map<string, AgentStore>;
   private readonly threadStores: Map<string, ThreadStore> = new Map();
   private readonly kbManagers: Map<string, KbManager> = new Map();
+  private readonly designManagers: Map<string, DesignManager> = new Map();
   /** Bridges keyed by "projectId:agentId" */
   private readonly claudeBridges: Map<string, ClaudeBridge> = new Map();
   /** Bridges stopped by restart escalation — prevents ensureBridge from respawning them. */
@@ -920,6 +922,17 @@ export class Gateway {
         const kb = this.resolveKb(projectId, agentId);
         if (!kb) { this.sendJson(res, 404, { error: `No KB for ${projectId}/${agentId}` }); return; }
         await this.handleKbRequest(method, pathname, req, res, kb);
+        return;
+      }
+
+      // --- Design endpoints ---
+      if (pathname.startsWith("/api/designs")) {
+        const projectId = this.resolveProjectId(req, parsed);
+        if (!projectId) { this.sendJson(res, 400, { error: "Missing project context." }); return; }
+        const agentId = this.resolveAgentId(req, parsed) ?? "designer";
+        const dm = this.resolveDesign(projectId, agentId);
+        if (!dm) { this.sendJson(res, 404, { error: `No designs dir for ${projectId}/${agentId}` }); return; }
+        await this.handleDesignRequest(method, pathname, req, res, dm);
         return;
       }
 
@@ -1857,6 +1870,64 @@ export class Gateway {
   }
 
   /* ---------------------------------------------------------------- */
+  /*  Design endpoints                                                 */
+  /* ---------------------------------------------------------------- */
+
+  private async handleDesignRequest(
+    method: string,
+    pathname: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    dm: DesignManager,
+  ): Promise<void> {
+    const url = new URL(req.url ?? "/", `http://localhost`);
+
+    // GET /api/designs/list
+    if (method === "GET" && pathname === "/api/designs/list") {
+      this.sendJson(res, 200, { files: dm.list() });
+      return;
+    }
+
+    // GET /api/designs/read?file=X
+    if (method === "GET" && pathname === "/api/designs/read") {
+      const file = url.searchParams.get("file");
+      if (!file) { this.sendJson(res, 400, { error: "file param is required" }); return; }
+      try {
+        const result = dm.read(file);
+        this.sendJson(res, 200, { file, content: result.content, encoding: result.encoding });
+      } catch {
+        this.sendJson(res, 404, { error: `File not found: ${file}` });
+      }
+      return;
+    }
+
+    // POST /api/designs/write
+    if (method === "POST" && pathname === "/api/designs/write") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      if (body.content === undefined) { this.sendJson(res, 400, { error: "content is required" }); return; }
+      dm.write(body.file, body.content, body.encoding);
+      this.sendJson(res, 200, { ok: true, file: body.file });
+      return;
+    }
+
+    // DELETE /api/designs/delete or POST /api/designs/delete
+    if ((method === "DELETE" || method === "POST") && pathname === "/api/designs/delete") {
+      const body = await this.readBody(req);
+      if (!body.file) { this.sendJson(res, 400, { error: "file is required" }); return; }
+      try {
+        dm.delete(body.file);
+        this.sendJson(res, 200, { ok: true, file: body.file });
+      } catch {
+        this.sendJson(res, 404, { ok: false, error: `File not found: ${body.file}` });
+      }
+      return;
+    }
+
+    this.sendJson(res, 404, { error: "Design endpoint not found" });
+  }
+
+  /* ---------------------------------------------------------------- */
   /*  Task endpoints                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -1897,10 +1968,14 @@ export class Gateway {
       const collaborators = Array.isArray(body.collaborators) ? body.collaborators.map((s: string) => String(s).trim()).filter(Boolean)
         : typeof body.collaborators === "string" ? body.collaborators.split(",").map((s: string) => s.trim()).filter(Boolean)
         : undefined;
+      const rawDesignDocs = body.designDocs ?? body.design_docs;
+      const designDocs = Array.isArray(rawDesignDocs)
+        ? rawDesignDocs.map((s: string) => String(s).trim()).filter(Boolean)
+        : undefined;
       const task = store.create({
         title: body.title, description: body.description, githubIssue: body.githubIssue,
         priority: body.priority, labels: body.labels, createdBy: body.createdBy ?? "unknown",
-        assignee: body.assignee, collaborators,
+        assignee: body.assignee, collaborators, designDocs,
       });
 
       // Create git worktree for this task (isolation per task)
@@ -1975,6 +2050,14 @@ export class Gateway {
           : typeof body.collaborators === "string"
             ? body.collaborators.split(",").map((s: string) => s.trim()).filter(Boolean)
             : [];
+      }
+      // Normalize designDocs before storing
+      if (body.designDocs || body.design_docs) {
+        const raw = body.designDocs ?? body.design_docs;
+        body.designDocs = Array.isArray(raw)
+          ? raw.map((s: string) => String(s).trim()).filter(Boolean)
+          : [];
+        delete body.design_docs;
       }
       const task = store.update(id, body, body.actor ?? "unknown");
 
@@ -2156,6 +2239,26 @@ export class Gateway {
     const kb = new KbManager(kbDir);
     this.kbManagers.set(key, kb);
     return kb;
+  }
+
+  private resolveDesign(projectId: string, agentId: string): DesignManager | null {
+    const key = this.bridgeKey(projectId, agentId);
+    const existing = this.designManagers.get(key);
+    if (existing) return existing;
+
+    let designDir: string;
+    if (agentId === "captain") {
+      designDir = path.join(this.dataDir, "agents", projectId, "captain", "designs");
+    } else {
+      const agentStore = this.agentStores.get(projectId);
+      if (!agentStore) return null;
+      designDir = agentStore.getDesignsDir(agentId);
+    }
+    // Always create the dir for designs (write will create it, but list/read need it)
+    const dm = new DesignManager(designDir);
+    dm.ensureDir();
+    this.designManagers.set(key, dm);
+    return dm;
   }
 
   /* ---------------------------------------------------------------- */
