@@ -333,6 +333,7 @@ export class Gateway {
       mockClaude: process.env.MOCK_CLAUDE === "1",
       ccBinDir,
       initialPrompt: `${agentName} online — ready for work`,
+      model: isCaptain ? "claude-opus-4-6" : "claude-sonnet-4-6",
     });
 
     // Wire bridge events — agentId captured in closure
