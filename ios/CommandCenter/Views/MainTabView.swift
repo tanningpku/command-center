@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Root view with 5 tabs: Home, Team, Board, Threads, Health.
+/// Root view with 6 tabs: Home, Docs, Threads, Board, Team, Health.
 struct MainTabView: View {
     @Environment(NavigationRouter.self) var router
     @Environment(ProjectStore.self) var projectStore
@@ -13,9 +13,9 @@ struct MainTabView: View {
                 .tag(NavigationRouter.Tab.home)
                 .tabItem { Label("Home", systemImage: "house") }
 
-            TeamGridView()
-                .tag(NavigationRouter.Tab.team)
-                .tabItem { Label("Team", systemImage: "person.3") }
+            DocsView()
+                .tag(NavigationRouter.Tab.docs)
+                .tabItem { Label("Docs", systemImage: "book") }
 
             ThreadListView()
                 .tag(NavigationRouter.Tab.threads)
@@ -25,9 +25,9 @@ struct MainTabView: View {
                 .tag(NavigationRouter.Tab.board)
                 .tabItem { Label("Board", systemImage: "rectangle.split.3x1") }
 
-            DocsView()
-                .tag(NavigationRouter.Tab.docs)
-                .tabItem { Label("Docs", systemImage: "book") }
+            TeamGridView()
+                .tag(NavigationRouter.Tab.team)
+                .tabItem { Label("Team", systemImage: "person.3") }
 
             HealthView()
                 .tag(NavigationRouter.Tab.health)
