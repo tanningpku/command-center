@@ -198,6 +198,13 @@ class DocsStore {
         isLoading = false
     }
 
+    /// Fetches raw HTML content for a design file without needing a DocItem.
+    /// Used by DesignSheetView when opening designs from the chat context header.
+    func fetchDesignContent(agentId: String, fileName: String) async throws -> String {
+        let response = try await api.fetchDesignRead(agentId: agentId, fileName: fileName)
+        return response.content
+    }
+
     func loadDocContent(doc: DocItem) async {
         let requestedDoc = doc
         selectedDoc = doc

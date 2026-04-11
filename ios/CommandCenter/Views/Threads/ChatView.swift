@@ -7,6 +7,7 @@ struct ChatView: View {
     let threadTitle: String
 
     @Environment(ThreadStore.self) var threadStore
+    @Environment(BoardStore.self) var boardStore
     @State private var inputText = ""
     @State private var scrollProxy: ScrollViewProxy?
 
@@ -26,9 +27,19 @@ struct ChatView: View {
         case idle, recording, transcribing
     }
 
+    /// Task linked to this thread via threadId, if any.
+    private var linkedTask: CCTask? {
+        boardStore.tasks.first { $0.threadId == threadId }
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
+                // Design context header (shown only when task has designDocs)
+                if let task = linkedTask, !task.designDocs.isEmpty {
+                    DesignContextHeaderView(task: task)
+                }
+
                 // Messages
                 ScrollViewReader { proxy in
                     ScrollView {
