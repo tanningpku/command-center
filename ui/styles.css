@@ -1597,6 +1597,99 @@ body {
   padding-left: 20px;
 }
 
+/* ── Chat Context Header (design docs) ───────────────────────── */
+
+.cc-chat-context-header {
+  border-bottom: 1px solid var(--cc-border);
+  background: var(--cc-surface-2);
+  flex-shrink: 0;
+}
+
+.cc-ctx-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+
+.cc-ctx-collapsed:hover {
+  background: var(--cc-surface-3);
+}
+
+.cc-ctx-task-id {
+  font-weight: 600;
+  color: var(--cc-text-secondary);
+}
+
+.cc-ctx-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cc-ctx-badge-blue  { background: rgba(88, 166, 255, 0.12); color: #58a6ff; border: 1px solid rgba(88, 166, 255, 0.2); }
+.cc-ctx-badge-green { background: rgba(63, 185, 80, 0.12);  color: #3fb950; border: 1px solid rgba(63, 185, 80, 0.2); }
+.cc-ctx-badge-red   { background: rgba(248, 81, 73, 0.12);  color: #f85149; border: 1px solid rgba(248, 81, 73, 0.2); }
+.cc-ctx-badge-yellow{ background: rgba(210, 153, 34, 0.12); color: #d29922; border: 1px solid rgba(210, 153, 34, 0.2); }
+.cc-ctx-badge-grey  { background: rgba(139, 148, 158, 0.1); color: #8b949e; border: 1px solid rgba(139, 148, 158, 0.2); }
+
+.cc-ctx-count {
+  color: var(--cc-text-faint);
+  margin-left: 2px;
+}
+
+.cc-ctx-chevron {
+  margin-left: auto;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--cc-text-faint);
+  transition: transform 0.15s ease;
+}
+
+.cc-chat-context-header.cc-ctx-open .cc-ctx-chevron {
+  transform: rotate(180deg);
+}
+
+.cc-ctx-expanded {
+  display: none;
+  padding: 0 16px 10px;
+}
+
+.cc-chat-context-header.cc-ctx-open .cc-ctx-expanded {
+  display: block;
+}
+
+.cc-ctx-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cc-ctx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(88, 166, 255, 0.1);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.cc-ctx-pill:hover {
+  background: rgba(88, 166, 255, 0.2);
+}
+
 /* ── Chat Messages ────────────────────────────────────────────── */
 
 .cc-chat-messages {

@@ -2163,6 +2163,7 @@ function renderThreadSidebar(threads) {
 function showChatEmptyState() {
   document.getElementById('chatEmptyState').style.display = 'flex';
   document.getElementById('chatHeader').style.display = 'none';
+  document.getElementById('chatContextHeader').style.display = 'none';
   document.getElementById('chatMessages').style.display = 'none';
   document.getElementById('chatInputBar').style.display = 'none';
 }
@@ -2179,6 +2180,52 @@ function showChatArea(title, participants) {
   }
 }
 
+function renderContextHeader(threadId) {
+  const el = document.getElementById('chatContextHeader');
+  const task = state.tasksByThreadId[threadId];
+
+  if (!task || !task.designDocs || task.designDocs.length === 0) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+
+  const stateClasses = {
+    created: 'grey', assigned: 'grey', in_progress: 'blue',
+    in_review: 'yellow', qa: 'yellow', blocked: 'red',
+    done: 'green', cancelled: 'grey',
+  };
+  const stateLabels = {
+    created: 'created', assigned: 'assigned', in_progress: 'in progress',
+    in_review: 'in review', qa: 'QA', blocked: 'blocked',
+    done: 'done', cancelled: 'cancelled',
+  };
+  const cls = stateClasses[task.state] || 'grey';
+  const stateLabel = stateLabels[task.state] || task.state;
+  const count = task.designDocs.length;
+  const countLabel = `${count} design${count !== 1 ? 's' : ''}`;
+
+  const pills = task.designDocs.map(ref => {
+    const [agent, ...fileParts] = ref.split(':');
+    const file = fileParts.join(':');
+    const title = docTitle(file);
+    return `<button class="cc-ctx-pill" data-design-agent="${escapeHtml(agent)}" data-design-file="${escapeHtml(file)}" title="Open ${escapeHtml(file)}">${escapeHtml(title)}</button>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="cc-ctx-collapsed" onclick="this.closest('.cc-chat-context-header').classList.toggle('cc-ctx-open')">
+      <span class="cc-ctx-task-id">${escapeHtml(task.id)}</span>
+      <span class="cc-ctx-badge cc-ctx-badge-${escapeHtml(cls)}">${escapeHtml(stateLabel)}</span>
+      <span class="cc-ctx-count">${escapeHtml(countLabel)}</span>
+      <span class="cc-ctx-chevron"></span>
+    </div>
+    <div class="cc-ctx-expanded">
+      <div class="cc-ctx-pills">${pills}</div>
+    </div>
+  `;
+  el.style.display = 'block';
+}
+
 async function selectThread(threadId) {
   state.activeThreadId = threadId;
   localStorage.setItem('cc-activeThreadId', threadId);
@@ -2193,6 +2240,7 @@ async function selectThread(threadId) {
   const participantNames = thread ? formatParticipants(thread.participants) : '';
 
   showChatArea(title, participantNames);
+  renderContextHeader(threadId);
   await loadChatMessages(threadId);
 }
 
@@ -2969,6 +3017,16 @@ document.getElementById('threadList').addEventListener('click', (e) => {
   const threadId = card.dataset.threadId;
   if (threadId) {
     selectThread(threadId);
+  }
+});
+
+// Context header — design pill clicks
+document.getElementById('chatContextHeader').addEventListener('click', (e) => {
+  const pill = e.target.closest('.cc-ctx-pill');
+  if (pill) {
+    const agent = pill.dataset.designAgent;
+    const file = pill.dataset.designFile;
+    if (agent && file) navigateToDesign(agent, file);
   }
 });
 
