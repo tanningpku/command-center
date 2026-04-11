@@ -149,13 +149,14 @@ actor APIService {
 
     // MARK: - Tasks
 
-    func fetchTasks(state: String? = nil, assignee: String? = nil, priority: String? = nil, search: String? = nil, labels: [String]? = nil) async throws -> TaskListResponse {
+    func fetchTasks(state: String? = nil, assignee: String? = nil, priority: String? = nil, search: String? = nil, labels: [String]? = nil, limit: Int? = nil) async throws -> TaskListResponse {
         var query: [(String, String)] = []
         if let state { query.append(("state", state)) }
         if let assignee { query.append(("assignee", assignee)) }
         if let priority { query.append(("priority", priority)) }
         if let search, !search.isEmpty { query.append(("search", search)) }
         if let labels, !labels.isEmpty { query.append(("labels", labels.joined(separator: ","))) }
+        if let limit { query.append(("limit", String(limit))) }
         return try await fetch("api/tasks", query: query)
     }
 

@@ -37,7 +37,8 @@ class BoardStore {
             let response = try await api.fetchTasks(
                 assignee: filterAssignee,
                 priority: filterPriority?.rawValue,
-                search: search.isEmpty ? nil : search
+                search: search.isEmpty ? nil : search,
+                limit: 10000
             )
             tasks = response.tasks
             isStale = false
