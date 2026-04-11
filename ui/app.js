@@ -2024,7 +2024,7 @@ async function loadThreadsData() {
   try {
     const [threadsResult, tasksResult] = await Promise.allSettled([
       apiCall('/api/threads?limit=50'),
-      apiCall('/api/tasks'),
+      apiCall('/api/tasks?limit=10000'),
     ]);
     const data = threadsResult.status === 'fulfilled' ? threadsResult.value : {};
     const threads = data.threads || data || [];
